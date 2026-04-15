@@ -32,14 +32,6 @@ const TOOLBOX_COLORS = [
   [230, 110, 60],
   [220, 50, 150]
 ];
-const HAND_CONNECTIONS = [
-  [0, 1], [1, 2], [2, 3], [3, 4],
-  [0, 5], [5, 6], [6, 7], [7, 8],
-  [0, 9], [9, 10], [10, 11], [11, 12],
-  [0, 13], [13, 14], [14, 15], [15, 16],
-  [0, 17], [17, 18], [18, 19], [19, 20],
-  [5, 9], [9, 13], [13, 17]
-];
 const SHAPE_TYPES = ["circle", "square", "triangle"];
 const OBJECT_COLORS = [
   [0, 200, 0], [0, 120, 255], [255, 100, 100], [200, 0, 200],
@@ -58,10 +50,6 @@ const MEDIAPIPE_SOURCES = [
     wasmRoot: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm"
   },
   {
-    moduleUrl: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs",
-    wasmRoot: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-  },
-  {
     moduleUrl: "https://unpkg.com/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs",
     wasmRoot: "https://unpkg.com/@mediapipe/tasks-vision@0.10.21/wasm"
   }
@@ -72,8 +60,14 @@ const sceneMode = requestedViewMode === "assembly" ? "assembly" : "maze";
 const isAssemblyMode = sceneMode === "assembly";
 
 const canvas = document.getElementById("simCanvas");
-const ctx = canvas.getContext("2d");
 const video = document.getElementById("cameraVideo");
+if (!canvas || !video) {
+  throw new Error("Required canvas or camera elements are missing from the page.");
+}
+const ctx = canvas.getContext("2d");
+if (!ctx) {
+  throw new Error("Unable to acquire the 2D drawing context.");
+}
 const detectionCanvas = document.createElement("canvas");
 const detectionCtx = detectionCanvas.getContext("2d");
 const tempRobotCanvas = document.createElement("canvas");
@@ -2057,8 +2051,6 @@ function drawFrozenLabel() {
   fillText(ctx, "FROZEN", SIM_W / 2, 35, 36, bgr([0, 80, 255]), "center", 700);
 }
 
-function drawModeBanner() {}
-
 function drawBootScreen() {
   ctx.clearRect(0, 0, SIM_W, SIM_H);
   ctx.fillStyle = rgb(0, 0, 0);
@@ -2260,7 +2252,6 @@ function loop(nowMs) {
   }
 
   drawSim();
-  drawModeBanner(ctx);
 
   if (robotFrozen) {
     drawFrozenLabel();

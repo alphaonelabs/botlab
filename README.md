@@ -145,8 +145,8 @@ You can open the project directly in a browser:
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/alphaonelabs/alphaonelabs-virtual-robotics-playground.git
-cd alphaonelabs-virtual-robotics-playground
+git clone https://github.com/alphaonelabs/botlab.git
+cd botlab
 ```
 
 2. Open `index.html` in a modern browser.

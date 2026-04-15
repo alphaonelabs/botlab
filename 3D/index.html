@@ -10,6 +10,10 @@
   <script>
     window.__robotViewMode = "maze";
     window.__assetVersion = Date.now().toString();
+    const sharedStylesheet = document.createElement("link");
+    sharedStylesheet.rel = "stylesheet";
+    sharedStylesheet.href = `./tutorial.css?v=${window.__assetVersion}`;
+    document.head.appendChild(sharedStylesheet);
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = `./style.css?v=${window.__assetVersion}`;
@@ -18,7 +22,7 @@
 </head>
 <body>
   <div class="tutorial-pop" id="maze-tutorial" role="dialog" aria-modal="true" aria-labelledby="maze-tutorial-title">
-    <div class="tutorial-card">
+    <div class="tutorial-card" tabindex="-1">
       <button class="tutorial-close" id="maze-tutorial-close" aria-label="Close tutorial">×</button>
       <div class="tutorial-kicker">Quick Start</div>
       <h2 id="maze-tutorial-title">3D Maze</h2>
@@ -43,9 +47,53 @@
   <video id="cameraVideo" autoplay playsinline muted></video>
   <script>
     const mazeTutorial = document.getElementById("maze-tutorial");
+    const mazeTutorialCard = mazeTutorial.querySelector(".tutorial-card");
+    const mazeTutorialClose = document.getElementById("maze-tutorial-close");
+    const mazeTutorialDismiss = document.getElementById("maze-tutorial-dismiss");
+    const mazeReturnTarget = document.querySelector(".route-nav a.is-active") ?? document.querySelector(".route-nav a");
+    const tutorialFocusSelector = 'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    const getMazeFocusable = () => Array.from(mazeTutorial.querySelectorAll(tutorialFocusSelector));
     const closeMazeTutorial = () => mazeTutorial.classList.add("is-hidden");
-    document.getElementById("maze-tutorial-close").addEventListener("click", closeMazeTutorial);
-    document.getElementById("maze-tutorial-dismiss").addEventListener("click", closeMazeTutorial);
+    const handleMazeTutorialKeydown = (event) => {
+      if (mazeTutorial.classList.contains("is-hidden")) {
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMazeTutorial();
+        mazeReturnTarget?.focus();
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      const focusableElements = getMazeFocusable();
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        mazeTutorialCard.focus();
+        return;
+      }
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && document.activeElement === firstFocusable) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleMazeTutorialKeydown);
+    mazeTutorialClose.addEventListener("click", () => {
+      closeMazeTutorial();
+      mazeReturnTarget?.focus();
+    });
+    mazeTutorialDismiss.addEventListener("click", () => {
+      closeMazeTutorial();
+      mazeReturnTarget?.focus();
+    });
+    mazeTutorialClose.focus();
   </script>
   <script>
     const appScript = document.createElement("script");

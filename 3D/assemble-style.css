@@ -14,6 +14,18 @@ body {
   font-family: "Segoe UI", Arial, sans-serif;
 }
 
+:root {
+  --tutorial-border: rgba(96, 165, 250, 0.55);
+  --tutorial-kicker: #93c5fd;
+  --tutorial-close-bg: rgba(30, 41, 59, 0.95);
+  --tutorial-close-text: #e2e8f0;
+  --tutorial-close-hover-bg: rgba(51, 65, 85, 0.98);
+  --tutorial-action-border: rgba(34, 197, 94, 0.65);
+  --tutorial-action-bg: rgba(20, 83, 45, 0.95);
+  --tutorial-action-text: #f0fdf4;
+  --tutorial-action-hover-bg: rgba(22, 101, 52, 1);
+}
+
 #simCanvas {
   width: min(100vw, calc(100vh * 16 / 9));
   height: min(100vh, calc(100vw * 9 / 16));
@@ -55,102 +67,3 @@ body {
   color: #ffffff;
 }
 
-.tutorial-pop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.48);
-  backdrop-filter: blur(4px);
-}
-
-.tutorial-pop.is-hidden {
-  display: none;
-}
-
-.tutorial-card {
-  position: relative;
-  width: min(460px, 100%);
-  padding: 22px 22px 18px;
-  border: 1px solid rgba(96, 165, 250, 0.55);
-  border-radius: 20px;
-  background: rgba(6, 12, 20, 0.96);
-  color: #e5eef8;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
-}
-
-.tutorial-kicker {
-  margin: 0 0 8px;
-  color: #93c5fd;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.tutorial-card h2 {
-  margin: 0 0 10px;
-  color: #fff;
-  font-size: 28px;
-  line-height: 1.05;
-}
-
-.tutorial-card p {
-  margin: 0 0 12px;
-  color: #cbd5e1;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.tutorial-card ul {
-  margin: 0 0 16px;
-  padding-left: 18px;
-  color: #dbe7f5;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.tutorial-card li + li {
-  margin-top: 8px;
-}
-
-.tutorial-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 999px;
-  background: rgba(30, 41, 59, 0.95);
-  color: #e2e8f0;
-  font-size: 20px;
-  cursor: pointer;
-}
-
-.tutorial-close:hover {
-  background: rgba(51, 65, 85, 0.98);
-}
-
-.tutorial-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 16px;
-  border: 1px solid rgba(34, 197, 94, 0.65);
-  border-radius: 999px;
-  background: rgba(20, 83, 45, 0.95);
-  color: #f0fdf4;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.tutorial-action:hover {
-  background: rgba(22, 101, 52, 1);
-}
