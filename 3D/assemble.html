@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>3D Robot Maze | Alpha One Labs</title>
+  <title>3D Gesture Robot Maze Playground</title>
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <script>
-    window.__robotViewMode = "maze";
     window.__assetVersion = Date.now().toString();
     const sharedStylesheet = document.createElement("link");
     sharedStylesheet.rel = "stylesheet";
@@ -16,61 +15,55 @@
     document.head.appendChild(sharedStylesheet);
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = `./style.css?v=${window.__assetVersion}`;
+    stylesheet.href = `./assemble-style.css?v=${window.__assetVersion}`;
     document.head.appendChild(stylesheet);
   </script>
 </head>
 <body>
-  <div class="tutorial-pop" id="maze-tutorial" role="dialog" aria-modal="true" aria-labelledby="maze-tutorial-title">
+  <div class="tutorial-pop" id="assembly-tutorial" role="dialog" aria-modal="true" aria-labelledby="assembly-tutorial-title">
     <div class="tutorial-card" tabindex="-1">
-      <button class="tutorial-close" id="maze-tutorial-close" aria-label="Close tutorial">×</button>
+      <button class="tutorial-close" id="assembly-tutorial-close" aria-label="Close tutorial">×</button>
       <div class="tutorial-kicker">Quick Start</div>
-      <h2 id="maze-tutorial-title">3D Maze</h2>
+      <h2 id="assembly-tutorial-title">3D Assembly</h2>
       <p>Use your right hand to move the robot:</p>
       <ul>
         <li><strong>1 finger</strong> = move forward</li>
         <li><strong>2 fingers</strong> = move backward</li>
         <li><strong>3 fingers</strong> = move right</li>
         <li><strong>4 fingers</strong> = move left</li>
-        <li><strong>M</strong> = new maze</li>
       </ul>
-      <button class="tutorial-action" id="maze-tutorial-dismiss">Got It</button>
+      <button class="tutorial-action" id="assembly-tutorial-dismiss">Got It</button>
     </div>
   </div>
-  <nav class="route-nav" aria-label="Playground pages">
-    <a href="../index.html">Main</a>
-    <a href="../home.html">2D Robotics</a>
-    <a href="./assemble.html">3D Assembly</a>
-    <a href="./index.html" class="is-active" aria-current="page">3D Maze</a>
-  </nav>
+  <a href="./index.html" class="mode-jump" aria-label="Move to 3D maze page">Move to Maze</a>
   <canvas id="simCanvas" width="1920" height="1080"></canvas>
   <video id="cameraVideo" autoplay playsinline muted></video>
   <script>
-    const mazeTutorial = document.getElementById("maze-tutorial");
-    const mazeTutorialCard = mazeTutorial.querySelector(".tutorial-card");
-    const mazeTutorialClose = document.getElementById("maze-tutorial-close");
-    const mazeTutorialDismiss = document.getElementById("maze-tutorial-dismiss");
-    const mazeReturnTarget = document.querySelector(".route-nav a.is-active") ?? document.querySelector(".route-nav a");
+    const assemblyTutorial = document.getElementById("assembly-tutorial");
+    const assemblyTutorialCard = assemblyTutorial.querySelector(".tutorial-card");
+    const assemblyTutorialClose = document.getElementById("assembly-tutorial-close");
+    const assemblyTutorialDismiss = document.getElementById("assembly-tutorial-dismiss");
+    const assemblyReturnTarget = document.querySelector(".mode-jump");
     const tutorialFocusSelector = 'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    const getMazeFocusable = () => Array.from(mazeTutorial.querySelectorAll(tutorialFocusSelector));
-    const closeMazeTutorial = () => mazeTutorial.classList.add("is-hidden");
-    const handleMazeTutorialKeydown = (event) => {
-      if (mazeTutorial.classList.contains("is-hidden")) {
+    const getAssemblyFocusable = () => Array.from(assemblyTutorial.querySelectorAll(tutorialFocusSelector));
+    const closeAssemblyTutorial = () => assemblyTutorial.classList.add("is-hidden");
+    const handleAssemblyTutorialKeydown = (event) => {
+      if (assemblyTutorial.classList.contains("is-hidden")) {
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        closeMazeTutorial();
-        mazeReturnTarget?.focus();
+        closeAssemblyTutorial();
+        assemblyReturnTarget?.focus();
         return;
       }
       if (event.key !== "Tab") {
         return;
       }
-      const focusableElements = getMazeFocusable();
+      const focusableElements = getAssemblyFocusable();
       if (focusableElements.length === 0) {
         event.preventDefault();
-        mazeTutorialCard.focus();
+        assemblyTutorialCard.focus();
         return;
       }
       const firstFocusable = focusableElements[0];
@@ -84,21 +77,21 @@
       }
     };
 
-    document.addEventListener("keydown", handleMazeTutorialKeydown);
-    mazeTutorialClose.addEventListener("click", () => {
-      closeMazeTutorial();
-      mazeReturnTarget?.focus();
+    document.addEventListener("keydown", handleAssemblyTutorialKeydown);
+    assemblyTutorialClose.addEventListener("click", () => {
+      closeAssemblyTutorial();
+      assemblyReturnTarget?.focus();
     });
-    mazeTutorialDismiss.addEventListener("click", () => {
-      closeMazeTutorial();
-      mazeReturnTarget?.focus();
+    assemblyTutorialDismiss.addEventListener("click", () => {
+      closeAssemblyTutorial();
+      assemblyReturnTarget?.focus();
     });
-    mazeTutorialClose.focus();
+    assemblyTutorialClose.focus();
   </script>
   <script>
     const appScript = document.createElement("script");
     appScript.defer = true;
-    appScript.src = `./app.js?v=${window.__assetVersion}`;
+    appScript.src = `./assemble-app.js?v=${window.__assetVersion}`;
     document.body.appendChild(appScript);
   </script>
 </body>

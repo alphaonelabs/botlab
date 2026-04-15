@@ -1,148 +1,328 @@
 # Alpha One Labs — Virtual Robotics Playground
 
-A browser-based virtual robotics simulation environment for building, configuring, and testing autonomous mobile robots with real-time physics and sensor telemetry — no installation required.
+A browser-based robotics playground for assembling, configuring, and testing modular mobile robots directly in the browser. The project currently includes an animated landing page and three core simulation experiences:
+
+1. A 2D robotics simulator
+2. A 3D robot assembly experience
+3. A 3D maze navigation challenge
+
+No build system is required for the current prototype. The project is designed to be easy to open, inspect, and extend.
 
 ---
 
-## 🚀 Features
+## Overview
 
-- **Modular Robot Builder** — Start from a blank chassis and attach sensors, wheels, and a manipulator arm.
-- **Omni-Directional Movement** — Drive your robot with WASD or Arrow keys; adjust motor power and turning speed in real-time.
-- **LiDAR Scanning** — A rotating 360° LiDAR sensor casts a detection beam. When it passes over an object, the **Detection Panel** reports the object's **shape** and **color**.
-- **First-Person Camera** — Live FPV camera feed rendered from the robot's perspective directly in the browser.
-- **Robotic Arm** — Pick up and drop coloured blocks using the SPACE key.
-- **Telemetry HUD** — Real-time position, heading, and speed readout overlaid on the simulation canvas.
+This repository explores how far a lightweight, browser-native robotics sandbox can go using HTML, CSS, JavaScript, Canvas rendering, and gesture input.
 
----
+The application is structured as a multi-entry playground:
 
-## 🛠️ Getting Started
+- `index.html` is the animated landing page and navigation hub.
+- `home.html` is the 2D robotics simulator.
+- `3D/assemble.html` is the 3D assembly experience.
+- `3D/index.html` is the 3D maze simulator.
 
-No build tools or server required — just open the files directly in your browser.
+The goal is to provide an accessible environment for robotics education and experimentation where users can:
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/alphaonelabs/alphaonelabs-virtual-robotics-playground.git
-   ```
-2. Open `index.html` in any modern web browser to view the landing page.
-3. Click **Enter System** to launch the interactive playground (`home.html`).
+- assemble a robot from modular parts
+- simulate sensing with LiDAR and camera systems
+- manipulate objects with a robotic arm
+- observe telemetry and sensor feedback
+- test robot configurations in a maze-like 3D challenge
 
 ---
 
-## 🎮 Controls
+## Core Experiences
 
-| Key / Action | Function |
-|---|---|
-| `W` / `↑` | Move forward |
-| `S` / `↓` | Move backward |
-| `A` / `←` | Turn left |
-| `D` / `→` | Turn right |
-| `SPACE` | Pick up / Drop block (requires Arm) |
+### 1. 2D Robotics Simulator
 
----
+The 2D simulator in `home.html` is a real-time Canvas-based robotics workspace with:
 
-## 🧩 Robot Components
+- modular part selection: chassis, wheels, LiDAR, camera, and arm
+- keyboard-driven locomotion with adjustable power and turn settings
+- object interaction through a robotic gripper
+- moving human entities in the environment
+- simulated LiDAR scanning and detection reporting
+- a simulated first-person camera overlay
+- live telemetry for position, heading, and speed
+- persistent state saving with `localStorage`
+- mobile-friendly on-screen touch controls
 
-Add or remove components from the **Toolbox** panel on the left:
+This mode works as a fast prototyping and interaction sandbox for robot behavior and sensor visualization.
 
-| Component | Description |
-|---|---|
-| **Chassis** | Core robot body — must be added before any other part |
-| **Wheels (WASD)** | Enables keyboard-driven movement |
-| **LiDAR** | Rotating laser scanner; detects nearby objects and reports shape & color |
-| **Camera (View)** | First-person camera feed shown in the top-left overlay |
-| **Arm (SPACE)** | Allows picking up and dropping blocks with the SPACE key |
+### 2. 3D Robot Assembly
 
----
+The 3D assembly experience in `3D/assemble.html` is the original gesture-driven assembly environment backed by `3D/assemble-app.js`.
 
-## 📡 LiDAR Detection
+It includes:
 
-When the LiDAR sensor is active, its beam sweeps 360° around the robot. When the beam intersects an object within range, the **Detection Panel** (bottom of the right sidebar) instantly displays:
+- a modular robot builder with multiple chassis, wheel, camera, LiDAR, and arm configurations
+- gesture-based interaction using MediaPipe hand tracking
+- keyboard fallback controls when camera access is unavailable
+- a 3D-styled Canvas-rendered world with floating objects and moving humans
+- a status panel showing equipped components and LiDAR scan results
+- a simulated live robot camera panel
+- object pickup and drop interactions when the robotic arm is extended
 
-- The **shape** of the detected object — `Square`, `Circle`, or `Triangle`
-- The **color** of the detected object — e.g. `Red`, `Orange`, `Green`, `Blue`
+This experience focuses on immersive robot configuration and embodied interaction.
 
----
+### 3. 3D Maze Navigation
 
-## ⚙️ Settings (Right Sidebar)
+The maze experience in `3D/index.html` is a separate 3D simulation built on `3D/app.js`.
 
-| Setting | Description |
-|---|---|
-| **Power** | Motor power level (10 % – 100 %) |
-| **Turn** | Turning speed (1° – 15°) |
-| **Color** | Chassis colour picker |
+It includes:
 
-The **Parts** section shows all currently attached components, and **Blocks** displays the number of interactive objects in the simulation.
+- procedural maze generation
+- first-person maze navigation
+- object and human placement inside the maze world
+- a visible exit target and maze reset loop
+- robot configuration controls for chassis, wheels, LiDAR, camera, and arm
+- simulated LiDAR contacts and robot status feedback
+- a mini-map / robot camera view
+- manual and gesture-based control modes
 
----
-
-## 🎨 Tech Stack
-
-- **Pure HTML5/CSS3/JavaScript** — No frameworks required for the simulator
-- **React 18** — Landing page animations (CDN)
-- **Tailwind CSS** — Utility-first styling (CDN)
-- **GSAP 3.12** — Smooth scroll animations (CDN)
-- **Canvas API** — Real-time 2D graphics rendering
+This experience extends the robot beyond assembly into a challenge environment where the user can test mobility and perception.
 
 ---
 
-## 🌐 Browser Support
+## Landing Page
 
-| Browser | Version | Status |
-|---------|---------|--------|
-| Chrome | 90+ | ✅ Fully Supported |
-| Firefox | 88+ | ✅ Fully Supported |
-| Safari | 14+ | ✅ Fully Supported |
-| Edge | 90+ | ✅ Fully Supported |
+The landing page in `index.html` acts as the visual entry point to the platform and includes:
+
+- animated background rendering
+- React-based section composition
+- GSAP-driven section transitions and scroll-triggered reveals
+- branded navigation and route entry points
+- direct links into all simulator experiences
+
+It is designed to frame the playground as a polished open-science robotics product rather than just a single HTML demo.
 
 ---
 
-## 🗂️ Project Structure
+## Feature Summary
 
+### Modular Robot System
+
+Across the simulator experiences, the robot can be configured with:
+
+- `Chassis`
+- `Wheels (WASD)`
+- `LiDAR`
+- `Camera (View)`
+- `Arm (SPACE)`
+
+The enabled modules affect movement, sensing, interaction, and visualization.
+
+### Sensing and Perception
+
+The repo simulates multiple sensing modalities:
+
+- LiDAR-style detection in 2D and 3D
+- first-person camera feeds
+- object shape and color reporting
+- human detection overlays in the 2D camera view
+
+### Interaction
+
+The project supports multiple interaction models:
+
+- keyboard control
+- mobile touch controls in the 2D simulator
+- gesture control in the 3D assembly and maze experiences
+- object pickup/drop using the robotic arm
+
+### Persistence
+
+The 2D simulator stores robot state, settings, and block state in `localStorage`, allowing the workspace to persist between reloads.
+
+---
+
+## Getting Started
+
+### Option 1: Open directly
+
+You can open the project directly in a browser:
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/alphaonelabs/botlab.git
+cd botlab
 ```
+
+2. Open `index.html` in a modern browser.
+
+This is enough for:
+
+- the landing page
+- the 2D robotics simulator
+- manual fallback mode in the 3D experiences
+
+### Option 2: Run a local static server
+
+For full camera-based gesture control in the 3D experiences, use a local server so the browser can provide camera access under `localhost`:
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open:
+
+```text
+http://localhost:8000/index.html
+```
+
+You can use any other static file server if preferred.
+
+---
+
+## Routes
+
+| Route | Purpose |
+|---|---|
+| `index.html` | Animated landing page and simulator hub |
+| `home.html` | 2D robotics simulator |
+| `3D/assemble.html` | 3D robot assembly experience |
+| `3D/index.html` | 3D maze simulation |
+
+---
+
+## Controls
+
+### 2D Simulator
+
+| Control | Action |
+|---|---|
+| `W` / `Arrow Up` | Move forward |
+| `S` / `Arrow Down` | Move backward |
+| `A` / `Arrow Left` | Turn left |
+| `D` / `Arrow Right` | Turn right |
+| `SPACE` | Pick up / drop block |
+| Touch controls | Mobile movement and pickup |
+
+### 3D Assembly
+
+Manual mode:
+
+- `W`, `A`, `S`, `D` move the robot
+- `1` to `5` cycle robot parts
+- `SPACE` picks up or drops an object
+- `Q` / `Esc` stops the session
+
+Gesture mode:
+
+- right hand controls movement and aiming
+- left hand handles freeze / action gestures
+- pinch interaction is used to work with the toolbox
+
+### 3D Maze
+
+Manual mode:
+
+- `W` / `S` drive forward and backward
+- `A` / `D` steer
+- `1` to `5` cycle robot parts
+- `SPACE` picks up or drops an object
+- `M` spawns a new maze
+- `Q` / `Esc` stops the session
+
+Gesture mode:
+
+- right hand drives or steers the robot
+- left hand handles freeze / action gestures
+
+---
+
+## Technical Highlights
+
+### Frontend Stack
+
+- HTML5
+- CSS3
+- JavaScript
+- React 18 via CDN on the landing page
+- Tailwind CSS via CDN
+- GSAP for animated landing page transitions
+
+### Simulation and Rendering
+
+- Canvas 2D rendering for all simulator experiences
+- custom real-time update/render loops
+- custom robot drawing and part composition
+- software-rendered 3D-style scenes
+- procedural maze generation
+- raycasting-based first-person maze rendering
+
+### Vision / Gesture Input
+
+- MediaPipe Tasks Vision for hand landmark detection
+- gesture classification for robot control and interaction
+
+---
+
+## Project Structure
+
+```text
 alphaonelabs-virtual-robotics-playground/
-├── index.html              # Landing page with animations
-├── home.html               # Main robotics simulator
-├── README.md               # This file
-├── CONTRIBUTING.md         # Contribution guidelines
-├── LICENSE                 # MIT License
-└── .github/
-    └── workflows/
-        ├── deploy.yml      # GitHub Pages deployment
-        └── pr-check.yml    # PR validation
+├── index.html              # Landing page / navigation hub
+├── home.html               # 2D robotics simulator
+├── 3D/
+│   ├── assemble.html       # 3D assembly entry page
+│   ├── assemble-app.js     # Legacy 3D assembly logic
+│   ├── assemble-style.css  # Styles for 3D assembly
+│   ├── index.html          # 3D maze entry page
+│   ├── app.js              # 3D maze logic
+│   └── style.css           # Shared 3D maze styling
+├── assets/
+│   └── logo.png
+├── README.md
+├── CONTRIBUTING.md
+└── LICENSE
 ```
 
 ---
 
-## 🤝 Contributing
+## Browser Notes
 
-Contributions, bug reports, and feature requests are welcome!
-
-1. Fork this repository
-2. Create a new branch: `git checkout -b feature/your-feature-name`
-3. Commit your changes: `git commit -m 'Add your feature'`
-4. Push to your fork: `git push origin feature/your-feature-name`
-5. Open a **Pull Request** against `main`
-
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines and open an [issue](https://github.com/alphaonelabs/alphaonelabs-virtual-robotics-playground/issues) first to discuss major changes before starting work.
+- The 2D simulator works well when opened directly from disk.
+- The 3D simulators can fall back to manual mode if camera access is not available.
+- Full gesture control requires camera permission and a secure browser context such as `localhost`.
 
 ---
 
-## 🗺️ Roadmap
+## Current Status
 
-- [ ] Save/Load robot configurations
-- [ ] Obstacle course challenges with scoring
-- [ ] Autonomous robot programming interface
-- [ ] Multiplayer support (WebRTC)
-- [ ] 3D rendering with Three.js
-- [ ] Mobile touch controls
-- [ ] Export simulation data (CSV/JSON)
+This project is an actively evolving prototype. The current repository already demonstrates:
+
+- modular robot assembly
+- sensor simulation
+- object manipulation
+- live UI telemetry
+- gesture input
+- 2D and 3D simulation paths
+- a separate challenge-oriented maze environment
+
+It is a strong base for future work in robotics education, simulation UX, and browser-native HRI experimentation.
 
 ---
 
-## 📄 License
+## Contributing
+
+Contributions, fixes, and improvements are welcome.
+
+1. Fork the repository
+2. Create a branch
+3. Commit your changes
+4. Push to your fork
+5. Open a pull request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for repository guidelines.
+
+---
+
+## License
 
 This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-*Built by [Alpha One Labs](https://github.com/alphaonelabs) — Advancing open science through education and robotics.*
+Built by [Alpha One Labs](https://github.com/alphaonelabs) for open robotics experimentation and education.

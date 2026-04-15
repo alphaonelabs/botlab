@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Alpha One Labs - Instrument</title>
+  <title>Alpha One Labs - Botlab</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -574,6 +574,9 @@
 
             <div className="flex flex-wrap gap-4 mt-10">
               <a href="home.html" className="tech-btn" onClick={(e) => {
+                if (e.button !== 0 || e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) {
+                  return;
+                }
                 e.preventDefault();
                 const overlay = document.getElementById('page-transition');
                 overlay.classList.add('active');
@@ -590,11 +593,14 @@
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
               </a>
-              <a href="/3D/index.html" className="tech-btn" style={{ letterSpacing: '0.14em' }} onClick={(e) => {
+              <a href="3D/assemble.html" className="tech-btn" style={{ letterSpacing: '0.14em' }} onClick={(e) => {
+                if (e.button !== 0 || e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) {
+                  return;
+                }
                 e.preventDefault();
                 const overlay = document.getElementById('page-transition');
                 overlay.classList.add('active');
-                setTimeout(() => { window.location.href = '/3D/index.html'; }, 1200);
+                setTimeout(() => { window.location.href = '3D/assemble.html'; }, 1200);
               }}>
                 <span className="btn-corner tl"></span>
                 <span className="btn-corner tr"></span>
@@ -605,6 +611,26 @@
                 <span>Assemble a robot in 3D</span>
                 <svg className="btn-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M20 7.5L12 3 4 7.5m16 0v9L12 21m8-13.5L12 12m0 9-8-4.5v-9M12 21v-9m0 0L4 7.5m8 4.5 8-4.5" />
+                </svg>
+              </a>
+              <a href="3D/index.html" className="tech-btn" style={{ letterSpacing: '0.14em' }} onClick={(e) => {
+                if (e.button !== 0 || e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) {
+                  return;
+                }
+                e.preventDefault();
+                const overlay = document.getElementById('page-transition');
+                overlay.classList.add('active');
+                setTimeout(() => { window.location.href = '3D/index.html'; }, 1200);
+              }}>
+                <span className="btn-corner tl"></span>
+                <span className="btn-corner tr"></span>
+                <span className="btn-corner bl"></span>
+                <span className="btn-corner br"></span>
+                <span className="btn-pulse"></span>
+                <span className="btn-status"></span>
+                <span>Run the 3D maze</span>
+                <svg className="btn-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 12h10M4 17h16" />
                 </svg>
               </a>
               <a href="https://github.com/alphaonelabs/botlab" target="_blank" rel="noopener noreferrer" className="tech-btn">
@@ -786,13 +812,13 @@
             <h2 className="text-4xl md:text-7xl font-medium tracking-tight mb-16 text-sys-accent">INITIALIZE DEPLOYMENT</h2>
             
             <div className="flex flex-col md:flex-row gap-6 md:gap-12 w-full max-w-4xl">
-              <a href="home.html" className="flex-1 border border-[#444] p-12 hover:bg-white hover:text-black transition-all group flex flex-col items-center">
-                <span className="text-3xl mb-4 font-light">Deploy Blank Chassis</span>
-                <span className="text-sm text-sys-muted group-hover:text-black transition-colors">Start from scratch and build your custom robot rig</span>
+              <a href="3D/assemble.html" className="flex-1 border border-[#444] p-12 hover:bg-white hover:text-black transition-all group flex flex-col items-center">
+                <span className="text-3xl mb-4 font-light">Assemble in 3D</span>
+                <span className="text-sm text-sys-muted group-hover:text-black transition-colors">Open the dedicated 3D assembly bay and configure the robot rig</span>
               </a>
-              <a href="home.html" className="flex-1 border border-[#444] p-12 hover:bg-white hover:text-black transition-all group flex flex-col items-center">
-                <span className="text-3xl mb-4 font-light">Load Preset Rig</span>
-                <span className="text-sm text-sys-muted group-hover:text-black transition-colors">Launch a pre-configured robot with standard sensors</span>
+              <a href="3D/index.html" className="flex-1 border border-[#444] p-12 hover:bg-white hover:text-black transition-all group flex flex-col items-center">
+                <span className="text-3xl mb-4 font-light">Launch 3D Maze</span>
+                <span className="text-sm text-sys-muted group-hover:text-black transition-colors">Take the configured robot into the maze course for a live drive test</span>
               </a>
             </div>
 

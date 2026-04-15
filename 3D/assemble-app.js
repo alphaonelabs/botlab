@@ -2,21 +2,12 @@ const CAM_W = 640;
 const CAM_H = 480;
 const SIM_W = 1920;
 const SIM_H = 1080;
-const DRIVE_SPEED = 0.11;
-const REVERSE_SPEED = 0.075;
+const ROBOT_SPEED = 0.15;
+const WORLD_RADIUS = 8.0;
 const GESTURE_STABLE_FRAMES = 3;
-const TURN_SPEED = 5.0;
-const PICKUP_RANGE = 0.95;
+const TURN_SPEED = 10.0;
+const PICKUP_RANGE = 1.5;
 const CLICK_COOLDOWN = 0.5;
-const PLAYER_RADIUS = 0.2;
-const MAZE_COLS = 9;
-const MAZE_ROWS = 9;
-const MAZE_OBJECT_COUNT = 24;
-const MAZE_HUMAN_COUNT = 7;
-const MAX_VIEW_DISTANCE = 18.0;
-const RAY_STRIP_WIDTH = 4;
-const MAZE_RESET_DELAY = 3.5;
-const DEG_TO_RAD = Math.PI / 180;
 const TOOLBOX_CATEGORIES = ["Chassis", "Wheels (WASD)", "Lidar", "Camera (View)", "Arm (SPACE)"];
 const TOOLBOX_PARTS = {
   "Chassis": ["None", "Standard", "Tank", "Humanoid", "Spider"],
@@ -31,6 +22,14 @@ const TOOLBOX_COLORS = [
   [50, 50, 200],
   [230, 110, 60],
   [220, 50, 150]
+];
+const HAND_CONNECTIONS = [
+  [0, 1], [1, 2], [2, 3], [3, 4],
+  [0, 5], [5, 6], [6, 7], [7, 8],
+  [0, 9], [9, 10], [10, 11], [11, 12],
+  [0, 13], [13, 14], [14, 15], [15, 16],
+  [0, 17], [17, 18], [18, 19], [19, 20],
+  [5, 9], [9, 13], [13, 17]
 ];
 const SHAPE_TYPES = ["circle", "square", "triangle"];
 const OBJECT_COLORS = [
@@ -50,24 +49,19 @@ const MEDIAPIPE_SOURCES = [
     wasmRoot: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm"
   },
   {
+    moduleUrl: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs",
+    wasmRoot: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+  },
+  {
     moduleUrl: "https://unpkg.com/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs",
     wasmRoot: "https://unpkg.com/@mediapipe/tasks-vision@0.10.21/wasm"
   }
 ];
 const HAND_LANDMARKER_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task";
-const requestedViewMode = window.__robotViewMode ?? new URLSearchParams(window.location.search).get("view");
-const sceneMode = requestedViewMode === "assembly" ? "assembly" : "maze";
-const isAssemblyMode = sceneMode === "assembly";
 
 const canvas = document.getElementById("simCanvas");
-const video = document.getElementById("cameraVideo");
-if (!canvas || !video) {
-  throw new Error("Required canvas or camera elements are missing from the page.");
-}
 const ctx = canvas.getContext("2d");
-if (!ctx) {
-  throw new Error("Unable to acquire the 2D drawing context.");
-}
+const video = document.getElementById("cameraVideo");
 const detectionCanvas = document.createElement("canvas");
 const detectionCtx = detectionCanvas.getContext("2d");
 const tempRobotCanvas = document.createElement("canvas");
@@ -110,6 +104,7 @@ const manualKeys = {
 let robotX = 0.0;
 let robotZ = 0.0;
 let robotAngle = 0.0;
+let targetAngle = 0.0;
 let robotState = "IDLE";
 let currentGesture = "NONE";
 let stableGesture = "NONE";
@@ -135,17 +130,28 @@ let showCursor = false;
 
 const staticObjects = [];
 const wanderingHumans = [];
-let mazeGrid = [];
-let mazeWidth = 0;
-let mazeHeight = 0;
-let mazeSpawnNodes = [];
-let mazeStart = { x: 1.5, z: 1.5, cellX: 0, cellZ: 0 };
-let mazeExit = { x: 1.5, z: 1.5, cellX: 0, cellZ: 0 };
-let mazeSolved = false;
-let mazeSolvedAt = 0.0;
-let lastRayDepths = [];
 const colorCache = new Map();
 const rng = mulberry32(42);
+
+for (let i = 0; i < 50; i += 1) {
+  staticObjects.push({
+    x: randFloat(-WORLD_RADIUS * 0.95, WORLD_RADIUS * 0.95),
+    z: randFloat(-WORLD_RADIUS * 0.95, WORLD_RADIUS * 0.95),
+    color: choose(OBJECT_COLORS),
+    shape: choose(SHAPE_TYPES),
+    size: randInt(6, 14)
+  });
+}
+
+for (let i = 0; i < 12; i += 1) {
+  wanderingHumans.push({
+    x: randFloat(-WORLD_RADIUS * 0.9, WORLD_RADIUS * 0.9),
+    z: randFloat(-WORLD_RADIUS * 0.9, WORLD_RADIUS * 0.9),
+    vx: randFloat(-0.02, 0.02),
+    vz: randFloat(-0.02, 0.02),
+    color: choose(HUMAN_COLORS)
+  });
+}
 
 function mulberry32(seed) {
   let value = seed >>> 0;
@@ -190,252 +196,6 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function normalizeAngle(angle) {
-  return (angle % 360 + 360) % 360;
-}
-
-function shuffleInPlace(list) {
-  for (let i = list.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng() * (i + 1));
-    [list[i], list[j]] = [list[j], list[i]];
-  }
-  return list;
-}
-
-function buildMazeLayout(cols, rows) {
-  const cells = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({
-    north: true,
-    east: true,
-    south: true,
-    west: true
-  })));
-  const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
-  const stack = [{ cellX: 0, cellZ: 0 }];
-  visited[0][0] = true;
-
-  while (stack.length > 0) {
-    const current = stack[stack.length - 1];
-    const neighbors = [];
-    const directions = [
-      { dx: 1, dz: 0, wall: "east", opposite: "west" },
-      { dx: -1, dz: 0, wall: "west", opposite: "east" },
-      { dx: 0, dz: 1, wall: "south", opposite: "north" },
-      { dx: 0, dz: -1, wall: "north", opposite: "south" }
-    ];
-
-    for (const direction of directions) {
-      const nextX = current.cellX + direction.dx;
-      const nextZ = current.cellZ + direction.dz;
-      if (nextX < 0 || nextZ < 0 || nextX >= cols || nextZ >= rows || visited[nextZ][nextX]) {
-        continue;
-      }
-      neighbors.push({ ...direction, nextX, nextZ });
-    }
-
-    if (neighbors.length === 0) {
-      stack.pop();
-      continue;
-    }
-
-    const choice = choose(neighbors);
-    cells[current.cellZ][current.cellX][choice.wall] = false;
-    cells[choice.nextZ][choice.nextX][choice.opposite] = false;
-    visited[choice.nextZ][choice.nextX] = true;
-    stack.push({ cellX: choice.nextX, cellZ: choice.nextZ });
-  }
-
-  const gridWidth = cols * 2 + 1;
-  const gridHeight = rows * 2 + 1;
-  const grid = Array.from({ length: gridHeight }, () => Array(gridWidth).fill(1));
-  const spawnNodes = [];
-
-  for (let cellZ = 0; cellZ < rows; cellZ += 1) {
-    for (let cellX = 0; cellX < cols; cellX += 1) {
-      const gridX = cellX * 2 + 1;
-      const gridZ = cellZ * 2 + 1;
-      grid[gridZ][gridX] = 0;
-      spawnNodes.push({
-        x: gridX + 0.5,
-        z: gridZ + 0.5,
-        cellX,
-        cellZ
-      });
-      if (!cells[cellZ][cellX].east) {
-        grid[gridZ][gridX + 1] = 0;
-      }
-      if (!cells[cellZ][cellX].south) {
-        grid[gridZ + 1][gridX] = 0;
-      }
-    }
-  }
-
-  const distances = Array.from({ length: rows }, () => Array(cols).fill(-1));
-  const queue = [{ cellX: 0, cellZ: 0 }];
-  distances[0][0] = 0;
-  let farthest = { cellX: 0, cellZ: 0, distance: 0 };
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    const cell = cells[current.cellZ][current.cellX];
-    const options = [];
-    if (!cell.north) {
-      options.push({ cellX: current.cellX, cellZ: current.cellZ - 1 });
-    }
-    if (!cell.east) {
-      options.push({ cellX: current.cellX + 1, cellZ: current.cellZ });
-    }
-    if (!cell.south) {
-      options.push({ cellX: current.cellX, cellZ: current.cellZ + 1 });
-    }
-    if (!cell.west) {
-      options.push({ cellX: current.cellX - 1, cellZ: current.cellZ });
-    }
-
-    for (const option of options) {
-      if (distances[option.cellZ][option.cellX] !== -1) {
-        continue;
-      }
-      distances[option.cellZ][option.cellX] = distances[current.cellZ][current.cellX] + 1;
-      const distance = distances[option.cellZ][option.cellX];
-      if (distance > farthest.distance) {
-        farthest = { ...option, distance };
-      }
-      queue.push(option);
-    }
-  }
-
-  const start = spawnNodes[0];
-  const exit = {
-    x: farthest.cellX * 2 + 1.5,
-    z: farthest.cellZ * 2 + 1.5,
-    cellX: farthest.cellX,
-    cellZ: farthest.cellZ
-  };
-
-  return { grid, gridWidth, gridHeight, spawnNodes, start, exit };
-}
-
-function chooseMazeNodes(count, blockedKeys = new Set()) {
-  const available = mazeSpawnNodes.filter((node) => !blockedKeys.has(`${node.cellX},${node.cellZ}`));
-  shuffleInPlace(available);
-  return available.slice(0, Math.min(count, available.length));
-}
-
-function getStartAngle() {
-  const eastOpen = !mazeGrid[1]?.[2];
-  return eastOpen ? 0 : 90;
-}
-
-function isWallAt(x, z) {
-  const tileX = Math.floor(x);
-  const tileZ = Math.floor(z);
-  if (tileX < 0 || tileZ < 0 || tileX >= mazeWidth || tileZ >= mazeHeight) {
-    return true;
-  }
-  return mazeGrid[tileZ][tileX] === 1;
-}
-
-function isBlockedAt(x, z) {
-  const offsets = [
-    [-PLAYER_RADIUS, -PLAYER_RADIUS],
-    [-PLAYER_RADIUS, 0],
-    [-PLAYER_RADIUS, PLAYER_RADIUS],
-    [0, -PLAYER_RADIUS],
-    [0, 0],
-    [0, PLAYER_RADIUS],
-    [PLAYER_RADIUS, -PLAYER_RADIUS],
-    [PLAYER_RADIUS, 0],
-    [PLAYER_RADIUS, PLAYER_RADIUS]
-  ];
-
-  for (const [offsetX, offsetZ] of offsets) {
-    if (isWallAt(x + offsetX, z + offsetZ)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function moveRobot(distance) {
-  const radians = robotAngle * DEG_TO_RAD;
-  const nextX = robotX + Math.cos(radians) * distance;
-  const nextZ = robotZ + Math.sin(radians) * distance;
-
-  if (!isBlockedAt(nextX, robotZ)) {
-    robotX = nextX;
-  }
-  if (!isBlockedAt(robotX, nextZ)) {
-    robotZ = nextZ;
-  }
-}
-
-function getRobotForwardVector() {
-  const radians = robotAngle * DEG_TO_RAD;
-  return { x: Math.cos(radians), z: Math.sin(radians) };
-}
-
-function getRobotRightVector() {
-  const radians = robotAngle * DEG_TO_RAD;
-  return { x: -Math.sin(radians), z: Math.cos(radians) };
-}
-
-function populateMazeWorld() {
-  staticObjects.length = 0;
-  wanderingHumans.length = 0;
-
-  const blockedKeys = new Set([
-    `${mazeStart.cellX},${mazeStart.cellZ}`,
-    `${mazeExit.cellX},${mazeExit.cellZ}`
-  ]);
-  const objectNodes = chooseMazeNodes(MAZE_OBJECT_COUNT, blockedKeys);
-
-  for (const node of objectNodes) {
-    blockedKeys.add(`${node.cellX},${node.cellZ}`);
-    staticObjects.push({
-      x: node.x + randFloat(-0.16, 0.16),
-      z: node.z + randFloat(-0.16, 0.16),
-      color: choose(OBJECT_COLORS),
-      shape: choose(SHAPE_TYPES),
-      size: randInt(6, 12)
-    });
-  }
-
-  const humanNodes = chooseMazeNodes(MAZE_HUMAN_COUNT, blockedKeys);
-  for (const node of humanNodes) {
-    wanderingHumans.push({
-      x: node.x,
-      z: node.z,
-      targetX: node.x,
-      targetZ: node.z,
-      speed: randFloat(0.008, 0.018),
-      color: choose(HUMAN_COLORS)
-    });
-  }
-
-  heldObject = null;
-  heldObjectIndex = null;
-}
-
-function resetMazeWorld(resetPose = true) {
-  const layout = buildMazeLayout(MAZE_COLS, MAZE_ROWS);
-  mazeGrid = layout.grid;
-  mazeWidth = layout.gridWidth;
-  mazeHeight = layout.gridHeight;
-  mazeSpawnNodes = layout.spawnNodes;
-  mazeStart = layout.start;
-  mazeExit = layout.exit;
-  mazeSolved = false;
-  mazeSolvedAt = 0.0;
-  populateMazeWorld();
-
-  if (resetPose) {
-    robotX = mazeStart.x;
-    robotZ = mazeStart.z;
-    robotAngle = getStartAngle();
-    robotState = "READY";
-  }
-}
-
 function selectedPart(category) {
   return TOOLBOX_PARTS[category][selectedParts[category]];
 }
@@ -458,10 +218,6 @@ function cycleSelectedPart(category, step = 1) {
 
 function applyManualPreset() {
   if (manualPresetApplied) {
-    return;
-  }
-  if (isAssemblyMode) {
-    manualPresetApplied = true;
     return;
   }
   manualPresetApplied = true;
@@ -488,23 +244,6 @@ function setControlMode(mode, title, detail) {
   modeBannerDetail = detail;
   if (mode === "manual") {
     applyManualPreset();
-  }
-}
-
-function updateAssemblyPreview() {
-  const turningLeft = stableGesture === "MOVE_LEFT" || manualKeys.KeyA;
-  const turningRight = stableGesture === "MOVE_RIGHT" || manualKeys.KeyD;
-  const chassisReady = selectedPart("Chassis") !== "None";
-  const rotationDelta = turningLeft ? -2.2 : turningRight ? 2.2 : 0.28;
-
-  robotAngle = normalizeAngle(robotAngle + rotationDelta);
-
-  if (!chassisReady) {
-    robotState = "SELECT CHASSIS";
-  } else if (turningLeft || turningRight) {
-    robotState = "ROTATING";
-  } else {
-    robotState = "ASSEMBLING";
   }
 }
 
@@ -678,48 +417,7 @@ function updateStableActionGesture(newGesture) {
   }
 }
 
-function getAdjacentMazeNodes(x, z) {
-  const tileX = Math.floor(x);
-  const tileZ = Math.floor(z);
-  const options = [];
-  const directions = [
-    { stepX: 2, stepZ: 0, midX: 1, midZ: 0 },
-    { stepX: -2, stepZ: 0, midX: -1, midZ: 0 },
-    { stepX: 0, stepZ: 2, midX: 0, midZ: 1 },
-    { stepX: 0, stepZ: -2, midX: 0, midZ: -1 }
-  ];
-
-  for (const direction of directions) {
-    const corridorX = tileX + direction.midX;
-    const corridorZ = tileZ + direction.midZ;
-    const nextTileX = tileX + direction.stepX;
-    const nextTileZ = tileZ + direction.stepZ;
-    if (mazeGrid[corridorZ]?.[corridorX] !== 0 || mazeGrid[nextTileZ]?.[nextTileX] !== 0) {
-      continue;
-    }
-    options.push({ x: nextTileX + 0.5, z: nextTileZ + 0.5 });
-  }
-
-  return options;
-}
-
-function updateMazeCompletion() {
-  if (mazeSolved) {
-    return;
-  }
-  const exitDist = Math.hypot(robotX - mazeExit.x, robotZ - mazeExit.z);
-  if (exitDist <= 0.45) {
-    mazeSolved = true;
-    mazeSolvedAt = frameSeconds;
-    robotState = "CLEARED";
-  }
-}
-
 function updateRobot() {
-  if (mazeSolved) {
-    robotState = "CLEARED";
-    return;
-  }
   if (robotFrozen) {
     robotState = "FROZEN";
     return;
@@ -731,56 +429,85 @@ function updateRobot() {
     return;
   }
 
-  let driveIntent = 0;
-  let turnIntent = 0;
-
-  if (controlMode === "manual") {
-    if (manualKeys.KeyW && !manualKeys.KeyS) {
-      driveIntent = 1;
-    } else if (manualKeys.KeyS && !manualKeys.KeyW) {
-      driveIntent = -1;
+  if (stableGesture === "LAND") {
+    const distToCenter = Math.sqrt(robotX * robotX + robotZ * robotZ);
+    if (distToCenter < 0.3) {
+      robotX = 0.0;
+      robotZ = 0.0;
+      robotState = "IDLE";
+      return;
     }
-    if (manualKeys.KeyA && !manualKeys.KeyD) {
-      turnIntent = -1;
-    } else if (manualKeys.KeyD && !manualKeys.KeyA) {
-      turnIntent = 1;
+
+    targetAngle = (Math.atan2(-robotX, -robotZ) * 180 / Math.PI + 360) % 360;
+    let diff = (targetAngle - robotAngle + 180) % 360 - 180;
+    if (Math.abs(diff) <= TURN_SPEED) {
+      robotAngle = targetAngle;
+    } else {
+      robotAngle += diff > 0 ? TURN_SPEED : -TURN_SPEED;
     }
-  } else if (stableGesture !== "HOVER" && stableGesture !== "LAND" && stableGesture !== "NONE") {
-    if (stableGesture === "MOVE_FORWARD") {
-      driveIntent = 1;
-    } else if (stableGesture === "MOVE_BACKWARD") {
-      driveIntent = -1;
-    } else if (stableGesture === "MOVE_LEFT") {
-      turnIntent = -1;
-    } else if (stableGesture === "MOVE_RIGHT") {
-      turnIntent = 1;
+    robotAngle = (robotAngle + 360) % 360;
+
+    diff = (targetAngle - robotAngle + 180) % 360 - 180;
+    if (Math.abs(diff) < 30) {
+      robotState = "WALKING";
+      robotX += (-robotX / distToCenter) * ROBOT_SPEED;
+      robotZ += (-robotZ / distToCenter) * ROBOT_SPEED;
+    } else {
+      robotState = "TURNING";
     }
-  }
-
-  const turnMultiplier = wheels === "Treads" ? 1.15 : wheels === "Legs" ? 0.8 : 1.0;
-  const driveMultiplier = wheels === "Treads" ? 0.92 : wheels === "Legs" ? 0.85 : 1.0;
-
-  if (turnIntent !== 0) {
-    robotAngle = normalizeAngle(robotAngle + turnIntent * TURN_SPEED * turnMultiplier);
-  }
-
-  if (driveIntent > 0) {
-    moveRobot(DRIVE_SPEED * driveMultiplier);
-  } else if (driveIntent < 0) {
-    moveRobot(-REVERSE_SPEED * driveMultiplier);
-  }
-
-  if (driveIntent > 0) {
-    robotState = turnIntent === 0 ? "DRIVING" : "STEERING";
-  } else if (driveIntent < 0) {
-    robotState = "REVERSING";
-  } else if (turnIntent !== 0) {
-    robotState = "TURNING";
   } else {
-    robotState = "STANDING";
+    let moving = false;
+    if (stableGesture === "HOVER") {
+      robotState = "STANDING";
+    } else {
+      if (stableGesture === "MOVE_FORWARD") {
+        targetAngle = 180;
+        moving = true;
+      } else if (stableGesture === "MOVE_BACKWARD") {
+        targetAngle = 0;
+        moving = true;
+      } else if (stableGesture === "MOVE_LEFT") {
+        targetAngle = 270;
+        moving = true;
+      } else if (stableGesture === "MOVE_RIGHT") {
+        targetAngle = 90;
+        moving = true;
+      }
+
+      let diff = (targetAngle - robotAngle + 180) % 360 - 180;
+      if (Math.abs(diff) <= TURN_SPEED) {
+        robotAngle = targetAngle;
+      } else {
+        robotAngle += diff > 0 ? TURN_SPEED : -TURN_SPEED;
+      }
+      robotAngle = (robotAngle + 360) % 360;
+      diff = (targetAngle - robotAngle + 180) % 360 - 180;
+
+      if (moving && Math.abs(diff) < 25) {
+        robotState = "WALKING";
+        if (stableGesture === "MOVE_FORWARD") {
+          robotZ -= ROBOT_SPEED;
+        } else if (stableGesture === "MOVE_BACKWARD") {
+          robotZ += ROBOT_SPEED;
+        } else if (stableGesture === "MOVE_LEFT") {
+          robotX -= ROBOT_SPEED;
+        } else if (stableGesture === "MOVE_RIGHT") {
+          robotX += ROBOT_SPEED;
+        }
+      } else if (moving) {
+        robotState = "TURNING";
+      } else {
+        robotState = "STANDING";
+      }
+    }
   }
 
-  updateMazeCompletion();
+  const radius = Math.sqrt(robotX * robotX + robotZ * robotZ);
+  if (radius > WORLD_RADIUS) {
+    const scale = WORLD_RADIUS / radius;
+    robotX *= scale;
+    robotZ *= scale;
+  }
 }
 
 function tryPickup() {
@@ -792,14 +519,12 @@ function tryPickup() {
   }
   let bestDist = PICKUP_RANGE;
   let bestIndex = null;
-  const forward = getRobotForwardVector();
   for (let i = 0; i < staticObjects.length; i += 1) {
     const object = staticObjects[i];
     const dx = object.x - robotX;
     const dz = object.z - robotZ;
     const dist = Math.hypot(dx, dz);
-    const facing = dx * forward.x + dz * forward.z;
-    if (dist < bestDist && facing > -0.15) {
+    if (dist < bestDist) {
       bestDist = dist;
       bestIndex = i;
     }
@@ -814,49 +539,35 @@ function tryDrop() {
   if (heldObject === null) {
     return;
   }
-  const forward = getRobotForwardVector();
-  const dropX = robotX + forward.x * 0.35;
-  const dropZ = robotZ + forward.z * 0.35;
-  if (!isBlockedAt(dropX, dropZ)) {
-    heldObject.x = dropX;
-    heldObject.z = dropZ;
-  } else {
-    heldObject.x = robotX;
-    heldObject.z = robotZ;
-  }
+  heldObject.x = robotX;
+  heldObject.z = robotZ;
   heldObject = null;
   heldObjectIndex = null;
 }
 
+function worldToScreen(wx, wz, centerX, horizonY, groundY, spanX) {
+  const sx = centerX + (wx / WORLD_RADIUS) * spanX;
+  const zNorm = (wz + WORLD_RADIUS) / (2 * WORLD_RADIUS);
+  const sy = horizonY + zNorm * (groundY - horizonY);
+  const scale = 0.3 + 0.7 * zNorm;
+  return { x: sx, y: sy, scale };
+}
+
 function updateWanderingHumans() {
   for (const human of wanderingHumans) {
-    const targetDx = human.targetX - human.x;
-    const targetDz = human.targetZ - human.z;
-    const targetDist = Math.hypot(targetDx, targetDz);
-
-    if (targetDist < 0.08) {
-      const options = getAdjacentMazeNodes(human.x, human.z).filter((option) => (
-        Math.hypot((human.lastNodeX ?? human.x) - option.x, (human.lastNodeZ ?? human.z) - option.z) > 0.1
-      ));
-      const nextTarget = choose(options.length > 0 ? options : getAdjacentMazeNodes(human.x, human.z));
-      if (nextTarget) {
-        human.lastNodeX = human.x;
-        human.lastNodeZ = human.z;
-        human.targetX = nextTarget.x;
-        human.targetZ = nextTarget.z;
-      }
-      continue;
+    human.x += human.vx;
+    human.z += human.vz;
+    if (Math.abs(human.x) > WORLD_RADIUS * 0.7) {
+      human.vx *= -1;
+      human.x = clamp(human.x, -WORLD_RADIUS * 0.7, WORLD_RADIUS * 0.7);
     }
-
-    const step = Math.min(human.speed, targetDist);
-    const nextX = human.x + (targetDx / targetDist) * step;
-    const nextZ = human.z + (targetDz / targetDist) * step;
-    if (!isBlockedAt(nextX, nextZ)) {
-      human.x = nextX;
-      human.z = nextZ;
-    } else {
-      human.targetX = human.x;
-      human.targetZ = human.z;
+    if (Math.abs(human.z) > WORLD_RADIUS * 0.7) {
+      human.vz *= -1;
+      human.z = clamp(human.z, -WORLD_RADIUS * 0.7, WORLD_RADIUS * 0.7);
+    }
+    if (rng() < 0.005) {
+      human.vx = randFloat(-0.02, 0.02);
+      human.vz = randFloat(-0.02, 0.02);
     }
   }
 }
@@ -919,21 +630,6 @@ function getLidarDetections(maxRange = 4.0) {
     const dist = Math.hypot(dx, dz);
     if (dist <= maxRange) {
       detections.push({ type: "Human", dist });
-    }
-  }
-  const exitDist = Math.hypot(mazeExit.x - robotX, mazeExit.z - robotZ);
-  if (!mazeSolved && exitDist <= maxRange) {
-    detections.push({ type: "Exit", dist: exitDist });
-  }
-  const wallProbes = [
-    { type: "Front wall", angleOffset: 0 },
-    { type: "Left wall", angleOffset: -40 },
-    { type: "Right wall", angleOffset: 40 }
-  ];
-  for (const probe of wallProbes) {
-    const hit = castRay(robotX, robotZ, robotAngle * DEG_TO_RAD + probe.angleOffset * DEG_TO_RAD, maxRange);
-    if (hit.hit && hit.distance <= maxRange) {
-      detections.push({ type: probe.type, dist: hit.distance });
     }
   }
   detections.sort((a, b) => a.dist - b.dist);
@@ -1016,7 +712,7 @@ function drawRobotModel(context, centerX, centerY, previewScale = 1) {
     }
   }
 
-  const isMoving = ["DRIVING", "REVERSING", "STEERING", "TURNING"].includes(robotState);
+  const isMoving = robotState === "WALKING" || robotState === "TURNING";
   if (wheels !== "None" && chassis !== "None") {
     const wheelRadius = Math.round(14 * s);
     if (wheels === "Treads") {
@@ -1307,141 +1003,45 @@ function drawToolbox(context, x, y) {
   });
 }
 
-function getCameraProfile() {
+function renderRobotCameraView() {
+  const viewWidth = robotViewCanvas.width;
+  const viewHeight = robotViewCanvas.height;
   const camType = selectedPart("Camera (View)");
-  if (camType === "Wide-Angle") {
-    return {
-      type: camType,
-      label: "WIDE-ANGLE",
-      fovDeg: 96,
-      skyTop: [18, 40, 70],
-      skyBottom: [70, 110, 165],
-      floorTop: [34, 52, 32],
-      floorBottom: [12, 18, 18],
-      wallMain: [172, 189, 164],
-      wallSide: [120, 138, 115],
-      accent: [70, 205, 255],
-      thermal: false
-    };
-  }
-  if (camType === "Thermal") {
-    return {
-      type: camType,
-      label: "THERMAL",
-      fovDeg: 74,
-      skyTop: [25, 10, 12],
-      skyBottom: [85, 32, 26],
-      floorTop: [65, 30, 12],
-      floorBottom: [16, 8, 6],
-      wallMain: [255, 140, 40],
-      wallSide: [170, 72, 22],
-      accent: [255, 186, 32],
-      thermal: true
-    };
-  }
-  if (camType === "Standard") {
-    return {
-      type: camType,
-      label: "STANDARD",
-      fovDeg: 78,
-      skyTop: [20, 30, 52],
-      skyBottom: [85, 110, 160],
-      floorTop: [28, 42, 36],
-      floorBottom: [10, 16, 18],
-      wallMain: [160, 176, 154],
-      wallSide: [104, 120, 100],
-      accent: [72, 224, 208],
-      thermal: false
-    };
-  }
-  return {
-    type: camType,
-    label: "BASIC VISUALS",
-    fovDeg: 70,
-    skyTop: [12, 16, 20],
-    skyBottom: [58, 66, 88],
-    floorTop: [24, 24, 26],
-    floorBottom: [6, 8, 10],
-    wallMain: [122, 126, 128],
-    wallSide: [82, 86, 90],
-    accent: [184, 184, 184],
-    thermal: false
-  };
-}
 
-function castRay(originX, originZ, angle, maxDistance = MAX_VIEW_DISTANCE) {
-  const rayDirX = Math.cos(angle);
-  const rayDirZ = Math.sin(angle);
-  let mapX = Math.floor(originX);
-  let mapZ = Math.floor(originZ);
-  const deltaDistX = rayDirX === 0 ? Number.POSITIVE_INFINITY : Math.abs(1 / rayDirX);
-  const deltaDistZ = rayDirZ === 0 ? Number.POSITIVE_INFINITY : Math.abs(1 / rayDirZ);
+  robotViewCtx.clearRect(0, 0, viewWidth, viewHeight);
 
-  let stepX = 0;
-  let stepZ = 0;
-  let sideDistX = 0;
-  let sideDistZ = 0;
-
-  if (rayDirX < 0) {
-    stepX = -1;
-    sideDistX = (originX - mapX) * deltaDistX;
-  } else {
-    stepX = 1;
-    sideDistX = (mapX + 1 - originX) * deltaDistX;
+  if (camType === "None") {
+    robotViewCtx.fillStyle = rgb(0, 0, 0);
+    robotViewCtx.fillRect(0, 0, viewWidth, viewHeight);
+    fillText(robotViewCtx, "NO CAMERA", viewWidth / 2, viewHeight / 2, 18, rgb(60, 60, 60), "center", 600);
+    return;
   }
 
-  if (rayDirZ < 0) {
-    stepZ = -1;
-    sideDistZ = (originZ - mapZ) * deltaDistZ;
-  } else {
-    stepZ = 1;
-    sideDistZ = (mapZ + 1 - originZ) * deltaDistZ;
+  const fovMap = { "Standard": 60, "Wide-Angle": 100, "Thermal": 60 };
+  const rangeMap = { "Standard": 5.0, "Wide-Angle": 5.0, "Thermal": 7.0 };
+  const fovDeg = fovMap[camType] ?? 60;
+  const maxRange = rangeMap[camType] ?? 5.0;
+  const halfFov = (fovDeg * Math.PI / 180) / 2;
+  const isThermal = camType === "Thermal";
+  const horizon = Math.floor(viewHeight / 3);
+
+  robotViewCtx.fillStyle = isThermal ? bgr([40, 20, 10]) : bgr([50, 40, 20]);
+  robotViewCtx.fillRect(0, 0, viewWidth, horizon);
+  robotViewCtx.fillStyle = isThermal ? bgr([50, 35, 15]) : bgr([40, 55, 40]);
+  robotViewCtx.fillRect(0, horizon, viewWidth, viewHeight - horizon);
+
+  for (let i = 1; i < 8; i += 1) {
+    const gridY = horizon + Math.floor((viewHeight - horizon) * i / 8);
+    robotViewCtx.beginPath();
+    robotViewCtx.moveTo(0, gridY);
+    robotViewCtx.lineTo(viewWidth, gridY);
+    robotViewCtx.strokeStyle = isThermal ? bgr([60, 40, 20]) : bgr([60, 70, 50]);
+    robotViewCtx.lineWidth = 1;
+    robotViewCtx.stroke();
   }
 
-  let hit = false;
-  let side = 0;
-  let distance = 0;
-
-  while (!hit && distance < maxDistance) {
-    if (sideDistX < sideDistZ) {
-      distance = sideDistX;
-      sideDistX += deltaDistX;
-      mapX += stepX;
-      side = 0;
-    } else {
-      distance = sideDistZ;
-      sideDistZ += deltaDistZ;
-      mapZ += stepZ;
-      side = 1;
-    }
-
-    if (mapX < 0 || mapZ < 0 || mapX >= mazeWidth || mapZ >= mazeHeight) {
-      hit = true;
-      distance = maxDistance;
-    } else if (mazeGrid[mapZ][mapX] === 1) {
-      hit = true;
-    }
-  }
-
-  const finalDistance = Math.min(distance, maxDistance);
-  return {
-    hit,
-    distance: finalDistance,
-    side,
-    mapX,
-    mapZ,
-    hitX: originX + rayDirX * finalDistance,
-    hitZ: originZ + rayDirZ * finalDistance
-  };
-}
-
-function getNearestPickupCandidate() {
-  if (selectedPart("Arm (SPACE)") !== "Extended" || heldObject !== null) {
-    return null;
-  }
-  const forward = getRobotForwardVector();
-  let bestObject = null;
-  let bestDistance = PICKUP_RANGE;
+  const robotRad = robotAngle * Math.PI / 180;
+  const visible = [];
 
   for (let i = 0; i < staticObjects.length; i += 1) {
     if (i === heldObjectIndex) {
@@ -1451,498 +1051,263 @@ function getNearestPickupCandidate() {
     const dx = object.x - robotX;
     const dz = object.z - robotZ;
     const dist = Math.hypot(dx, dz);
-    const facing = dx * forward.x + dz * forward.z;
-    if (dist < bestDistance && facing > -0.15) {
-      bestObject = { object, distance: dist };
-      bestDistance = dist;
+    if (dist > maxRange || dist < 0.3) {
+      continue;
+    }
+    let relAngle = Math.atan2(dx, dz) - robotRad;
+    relAngle = ((relAngle + Math.PI) % (Math.PI * 2)) - Math.PI;
+    if (Math.abs(relAngle) < halfFov) {
+      visible.push({ type: "obj", data: object, dist, angle: relAngle });
     }
   }
 
-  return bestObject;
+  for (const human of wanderingHumans) {
+    const dx = human.x - robotX;
+    const dz = human.z - robotZ;
+    const dist = Math.hypot(dx, dz);
+    if (dist > maxRange || dist < 0.3) {
+      continue;
+    }
+    let relAngle = Math.atan2(dx, dz) - robotRad;
+    relAngle = ((relAngle + Math.PI) % (Math.PI * 2)) - Math.PI;
+    if (Math.abs(relAngle) < halfFov) {
+      visible.push({ type: "human", data: human, dist, angle: relAngle });
+    }
+  }
+
+  visible.sort((a, b) => b.dist - a.dist);
+
+  for (const item of visible) {
+    const screenX = viewWidth / 2 - (item.angle / halfFov) * (viewWidth / 2);
+    const depthFrac = 1.0 - item.dist / maxRange;
+    const screenY = horizon + (viewHeight - horizon) * (0.2 + 0.7 * depthFrac);
+    const scale = 0.3 + 0.7 * depthFrac;
+
+    if (item.type === "obj") {
+      const object = item.data;
+      const size = Math.round(object.size * scale * 1.5);
+      const fillStyle = isThermal
+        ? bgr([0, Math.round(80 + 100 * depthFrac), Math.round(150 + 100 * depthFrac)])
+        : bgr(object.color);
+      drawObjectShape(robotViewCtx, object, screenX, screenY, size, fillStyle);
+    } else {
+      const humanScale = scale * 0.8;
+      const depthColor = isThermal
+        ? [0, Math.round(100 + 155 * depthFrac), Math.round(200 + 55 * depthFrac)]
+        : item.data.color;
+      drawStickFigure(robotViewCtx, screenX, screenY, humanScale, depthColor);
+    }
+  }
+
+  const crossX = viewWidth / 2;
+  const crossY = viewHeight / 2;
+  const crossColor = bgr([0, 200, 200]);
+  robotViewCtx.save();
+  robotViewCtx.strokeStyle = crossColor;
+  robotViewCtx.lineWidth = 1;
+  robotViewCtx.beginPath();
+  robotViewCtx.moveTo(crossX - 8, crossY);
+  robotViewCtx.lineTo(crossX - 3, crossY);
+  robotViewCtx.moveTo(crossX + 3, crossY);
+  robotViewCtx.lineTo(crossX + 8, crossY);
+  robotViewCtx.moveTo(crossX, crossY - 8);
+  robotViewCtx.lineTo(crossX, crossY - 3);
+  robotViewCtx.moveTo(crossX, crossY + 3);
+  robotViewCtx.lineTo(crossX, crossY + 8);
+  robotViewCtx.stroke();
+  robotViewCtx.restore();
 }
 
-function drawExitMarker(context, x, y, size, accent) {
-  const glow = 0.55 + 0.45 * Math.sin(frameSeconds * 4);
-  const width = size * 0.7;
-  const height = size * 1.05;
+function drawStatusPanel(context) {
+  const panelWidth = 600;
+  const panelHeight = 200;
+  const panelX = 10;
+  const panelY = SIM_H - panelHeight - 10;
+
   context.save();
-  context.shadowBlur = 18;
-  context.shadowColor = rgb(accent[0], accent[1], accent[2], 0.6);
-  fillRoundedRect(context, x - width / 2, y - height, width, height, 14, rgb(26, 30, 28, 0.9));
-  strokeRoundedRect(context, x - width / 2, y - height, width, height, 14, rgb(accent[0], accent[1], accent[2], 0.95), 2);
+  context.fillStyle = rgb(20, 20, 20, 0.7);
+  context.fillRect(panelX, panelY, panelWidth, panelHeight);
+  context.strokeStyle = rgb(100, 100, 100);
+  context.lineWidth = 1;
+  context.strokeRect(panelX, panelY, panelWidth, panelHeight);
+  fillText(context, "EQUIPPED", panelX + 10, panelY + 24, 20, rgb(200, 200, 200), "left", 600);
   context.beginPath();
-  context.moveTo(x - width * 0.18, y - height * 0.74);
-  context.lineTo(x + width * 0.22, y - height * 0.5);
-  context.lineTo(x - width * 0.18, y - height * 0.26);
-  context.strokeStyle = rgb(accent[0], accent[1], accent[2], glow);
-  context.lineWidth = 4;
+  context.moveTo(panelX + 10, panelY + 30);
+  context.lineTo(panelX + 120, panelY + 30);
+  context.strokeStyle = rgb(80, 80, 80);
   context.stroke();
+
+  let row = 0;
+  const partLabels = [
+    ["Chassis", TOOLBOX_COLORS[0]],
+    ["Wheels (WASD)", TOOLBOX_COLORS[1]],
+    ["Lidar", TOOLBOX_COLORS[2]],
+    ["Camera (View)", TOOLBOX_COLORS[3]],
+    ["Arm (SPACE)", TOOLBOX_COLORS[4]]
+  ];
+
+  for (const [category, color] of partLabels) {
+    const value = selectedPart(category);
+    if (value === "None" || value === "Off") {
+      continue;
+    }
+    const shortCategory = category.split(" (")[0];
+    const text = `${shortCategory}: ${value}`;
+    const textY = panelY + 50 + row * 22;
+    context.beginPath();
+    context.fillStyle = bgr(color);
+    context.arc(panelX + 16, textY - 5, 5, 0, Math.PI * 2);
+    context.fill();
+    fillText(context, text, panelX + 28, textY, 18, rgb(220, 220, 220), "left", 500);
+    row += 1;
+  }
+
+  if (row === 0) {
+    fillText(context, "No parts equipped", panelX + 16, panelY + 55, 17, rgb(120, 120, 120), "left", 500);
+  }
+
+  if (heldObject !== null) {
+    const textY = panelY + 50 + row * 22;
+    context.beginPath();
+    context.fillStyle = bgr(heldObject.color);
+    context.arc(panelX + 16, textY - 5, 5, 0, Math.PI * 2);
+    context.fill();
+    fillText(context, `Holding: ${heldObject.shape[0].toUpperCase() + heldObject.shape.slice(1)}`, panelX + 28, textY, 18, bgr([0, 200, 255]), "left", 600);
+  }
+
+  const lidarX = panelX + 280;
+  context.beginPath();
+  context.moveTo(lidarX - 5, panelY + 8);
+  context.lineTo(lidarX - 5, panelY + panelHeight - 8);
+  context.strokeStyle = rgb(60, 60, 60);
+  context.stroke();
+  fillText(context, "LIDAR SCAN", lidarX + 6, panelY + 24, 20, bgr([100, 100, 240]), "left", 600);
+  context.beginPath();
+  context.moveTo(lidarX + 6, panelY + 30);
+  context.lineTo(lidarX + 140, panelY + 30);
+  context.strokeStyle = rgb(80, 80, 80);
+  context.stroke();
+
+  if (selectedPart("Lidar") !== "On") {
+    fillText(context, "OFFLINE", lidarX + 16, panelY + 60, 18, rgb(80, 80, 80), "left", 500);
+  } else {
+    const detections = getLidarDetections();
+    if (detections.length === 0) {
+      fillText(context, "No contacts", lidarX + 16, panelY + 60, 17, bgr([80, 200, 80]), "left", 500);
+    } else {
+      detections.slice(0, 8).forEach((detection, index) => {
+        const entryY = panelY + 50 + index * 20;
+        const distText = `${detection.dist.toFixed(1)}m`;
+        const label = `${detection.type} - ${distText}`;
+        const color = detection.dist < 1.5
+          ? [50, 50, 255]
+          : detection.dist < 3.0
+            ? [50, 200, 255]
+            : [80, 200, 80];
+        context.beginPath();
+        context.fillStyle = bgr(color);
+        context.arc(lidarX + 12, entryY - 4, 4, 0, Math.PI * 2);
+        context.fill();
+        fillText(context, label, lidarX + 24, entryY, 16, bgr(color), "left", 500);
+      });
+    }
+  }
+
   context.restore();
 }
 
-function drawMazeSprites(context, profile, horizonY, depthBuffer) {
-  const sprites = [];
-  const forward = getRobotForwardVector();
-  const right = getRobotRightVector();
-  const halfFovTan = Math.tan((profile.fovDeg * DEG_TO_RAD) / 2);
-  const maxViewDistance = profile.thermal ? MAX_VIEW_DISTANCE + 2 : MAX_VIEW_DISTANCE;
+function drawSim() {
+  ctx.clearRect(0, 0, SIM_W, SIM_H);
+  ctx.fillStyle = rgb(0, 0, 0);
+  ctx.fillRect(0, 0, SIM_W, SIM_H);
 
-  const pushSprite = (type, data, worldX, worldZ) => {
-    const dx = worldX - robotX;
-    const dz = worldZ - robotZ;
-    const depth = dx * forward.x + dz * forward.z;
-    if (depth <= 0.12 || depth > maxViewDistance) {
-      return;
-    }
-    const lateral = dx * right.x + dz * right.z;
-    if (Math.abs(lateral) > depth * halfFovTan * 1.35) {
-      return;
-    }
+  const centerX = SIM_W / 2;
+  const groundY = SIM_H * 0.75;
+  const horizonY = SIM_H * 0.25;
+  const spanX = SIM_W * 0.4;
+  const numLines = 60;
 
-    const normalizedX = lateral / (depth * halfFovTan);
-    const screenX = SIM_W / 2 + normalizedX * (SIM_W / 2);
-    const depthIndex = clamp(Math.floor(screenX / RAY_STRIP_WIDTH), 0, depthBuffer.length - 1);
-    if (depth > depthBuffer[depthIndex] + 0.2) {
-      return;
-    }
-
-    const floorAnchor = horizonY + Math.min(SIM_H * 0.4, (SIM_H * 0.52) / Math.max(depth, 0.3));
-    sprites.push({ type, data, depth, screenX, floorAnchor });
-  };
+  ctx.save();
+  ctx.strokeStyle = bgr([30, 50, 50]);
+  ctx.lineWidth = 1;
+  for (let i = -numLines; i <= numLines; i += 1) {
+    const xBottom = centerX + i * 30;
+    const xTop = centerX + i * 10;
+    ctx.beginPath();
+    ctx.moveTo(xBottom, groundY);
+    ctx.lineTo(xTop, horizonY);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = bgr([25, 45, 45]);
+  for (let j = 1; j < 10; j += 1) {
+    const t = j / 10;
+    const y = horizonY + t * (groundY - horizonY);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(SIM_W, y);
+    ctx.stroke();
+  }
+  ctx.restore();
 
   for (let i = 0; i < staticObjects.length; i += 1) {
     if (i === heldObjectIndex) {
       continue;
     }
     const object = staticObjects[i];
-    pushSprite("object", object, object.x, object.z);
-  }
-
-  for (const human of wanderingHumans) {
-    pushSprite("human", human, human.x, human.z);
-  }
-
-  if (!mazeSolved) {
-    pushSprite("exit", mazeExit, mazeExit.x, mazeExit.z);
-  }
-
-  sprites.sort((a, b) => b.depth - a.depth);
-
-  for (const sprite of sprites) {
-    const depthFrac = clamp(1 - sprite.depth / maxViewDistance, 0, 1);
-    if (sprite.type === "object") {
-      const size = clamp((sprite.data.size * 25) / sprite.depth, 8, 170);
-      const fillStyle = profile.thermal
-        ? rgb(255, Math.round(120 + depthFrac * 80), Math.round(20 + depthFrac * 30))
-        : bgr(sprite.data.color);
-      drawObjectShape(context, sprite.data, sprite.screenX, sprite.floorAnchor - size * 0.55, size, fillStyle);
-    } else if (sprite.type === "human") {
-      const humanScale = clamp(4.8 / sprite.depth, 0.45, 3.2);
-      const tone = profile.thermal
-        ? [20, Math.round(130 + depthFrac * 110), 255]
-        : sprite.data.color;
-      drawStickFigure(context, sprite.screenX, sprite.floorAnchor, humanScale, tone);
-    } else if (sprite.type === "exit") {
-      const size = clamp(200 / sprite.depth, 34, 210);
-      drawExitMarker(context, sprite.screenX, sprite.floorAnchor + size * 0.15, size, profile.accent);
-    }
-  }
-}
-
-function renderRobotCameraView() {
-  const viewWidth = robotViewCanvas.width;
-  const viewHeight = robotViewCanvas.height;
-  const profile = getCameraProfile();
-  const scale = Math.min((viewWidth - 26) / mazeWidth, (viewHeight - 26) / mazeHeight);
-  const offsetX = (viewWidth - mazeWidth * scale) / 2;
-  const offsetY = (viewHeight - mazeHeight * scale) / 2;
-
-  robotViewCtx.clearRect(0, 0, viewWidth, viewHeight);
-  fillRoundedRect(robotViewCtx, 0, 0, viewWidth, viewHeight, 18, rgb(9, 13, 16, 0.95));
-
-  for (let z = 0; z < mazeHeight; z += 1) {
-    for (let x = 0; x < mazeWidth; x += 1) {
-      const wall = mazeGrid[z][x] === 1;
-      robotViewCtx.fillStyle = wall
-        ? rgb(profile.wallSide[0] * 0.45, profile.wallSide[1] * 0.45, profile.wallSide[2] * 0.45)
-        : rgb(18, 24, 28);
-      robotViewCtx.fillRect(offsetX + x * scale, offsetY + z * scale, scale, scale);
-    }
-  }
-
-  robotViewCtx.fillStyle = rgb(profile.accent[0], profile.accent[1], profile.accent[2], 0.2);
-  for (const object of staticObjects) {
-    if (object === heldObject) {
-      continue;
-    }
-    robotViewCtx.beginPath();
-    robotViewCtx.arc(offsetX + object.x * scale, offsetY + object.z * scale, Math.max(2, scale * 0.18), 0, Math.PI * 2);
-    robotViewCtx.fill();
-  }
-
-  robotViewCtx.fillStyle = profile.thermal ? rgb(255, 160, 50) : rgb(170, 220, 255);
-  for (const human of wanderingHumans) {
-    robotViewCtx.beginPath();
-    robotViewCtx.arc(offsetX + human.x * scale, offsetY + human.z * scale, Math.max(2.5, scale * 0.22), 0, Math.PI * 2);
-    robotViewCtx.fill();
-  }
-
-  robotViewCtx.save();
-  robotViewCtx.shadowBlur = 12;
-  robotViewCtx.shadowColor = rgb(profile.accent[0], profile.accent[1], profile.accent[2], 0.6);
-  robotViewCtx.fillStyle = rgb(profile.accent[0], profile.accent[1], profile.accent[2], 0.95);
-  robotViewCtx.beginPath();
-  robotViewCtx.arc(offsetX + mazeExit.x * scale, offsetY + mazeExit.z * scale, Math.max(4, scale * 0.28), 0, Math.PI * 2);
-  robotViewCtx.fill();
-  robotViewCtx.restore();
-
-  const heading = robotAngle * DEG_TO_RAD;
-  const coneAngle = (profile.fovDeg * DEG_TO_RAD) / 2;
-  const robotMapX = offsetX + robotX * scale;
-  const robotMapZ = offsetY + robotZ * scale;
-  const coneLength = Math.max(18, scale * 2.8);
-
-  robotViewCtx.save();
-  robotViewCtx.fillStyle = rgb(profile.accent[0], profile.accent[1], profile.accent[2], 0.18);
-  robotViewCtx.beginPath();
-  robotViewCtx.moveTo(robotMapX, robotMapZ);
-  robotViewCtx.lineTo(robotMapX + Math.cos(heading - coneAngle) * coneLength, robotMapZ + Math.sin(heading - coneAngle) * coneLength);
-  robotViewCtx.lineTo(robotMapX + Math.cos(heading + coneAngle) * coneLength, robotMapZ + Math.sin(heading + coneAngle) * coneLength);
-  robotViewCtx.closePath();
-  robotViewCtx.fill();
-  robotViewCtx.restore();
-
-  robotViewCtx.beginPath();
-  robotViewCtx.arc(robotMapX, robotMapZ, Math.max(3.5, scale * 0.24), 0, Math.PI * 2);
-  robotViewCtx.fillStyle = rgb(255, 255, 255);
-  robotViewCtx.fill();
-  robotViewCtx.strokeStyle = rgb(profile.accent[0], profile.accent[1], profile.accent[2], 1);
-  robotViewCtx.lineWidth = 2;
-  robotViewCtx.stroke();
-
-  fillText(robotViewCtx, "MAZE NAV", 14, 22, 15, rgb(220, 230, 235), "left", 700);
-  fillText(robotViewCtx, profile.label, viewWidth - 14, 22, 13, rgb(profile.accent[0], profile.accent[1], profile.accent[2]), "right", 700);
-}
-
-function drawAssemblyStatusPanel(context) {
-  const panelWidth = 760;
-  const panelHeight = 236;
-  const panelX = 16;
-  const panelY = SIM_H - panelHeight - 16;
-  const summaryLines = [
-    `State: ${robotState}`,
-    `Scene: 3D assembly bay`,
-    `Control: ${controlMode === "manual" ? "keyboard shortcuts" : "hand-tracked toolbox"}`,
-    selectedPart("Chassis") === "None"
-      ? "Ready: choose a chassis to begin"
-      : "Ready: chassis locked, refine the build"
-  ];
-
-  fillRoundedRect(context, panelX, panelY, panelWidth, panelHeight, 18, rgb(8, 14, 18, 0.84));
-  strokeRoundedRect(context, panelX, panelY, panelWidth, panelHeight, 18, rgb(56, 118, 126, 0.85), 1);
-  fillText(context, "ASSEMBLY STATUS", panelX + 18, panelY + 28, 21, rgb(226, 235, 240), "left", 700);
-
-  summaryLines.forEach((line, index) => {
-    fillText(context, line, panelX + 18, panelY + 58 + index * 22, 17, rgb(210, 215, 220), "left", 500);
-  });
-
-  fillText(context, "CURRENT BUILD", panelX + 18, panelY + 144, 16, rgb(150, 170, 180), "left", 700);
-  [
-    ["Chassis", TOOLBOX_COLORS[0]],
-    ["Wheels (WASD)", TOOLBOX_COLORS[1]],
-    ["Lidar", TOOLBOX_COLORS[2]],
-    ["Camera (View)", TOOLBOX_COLORS[3]],
-    ["Arm (SPACE)", TOOLBOX_COLORS[4]]
-  ].forEach(([category, color], index) => {
-    const lineY = panelY + 166 + index * 14;
-    context.beginPath();
-    context.arc(panelX + 21, lineY - 5, 4, 0, Math.PI * 2);
-    context.fillStyle = bgr(color);
-    context.fill();
-    fillText(
-      context,
-      `${category.split(" (")[0]}: ${selectedPart(category)}`,
-      panelX + 34,
-      lineY,
-      14,
-      rgb(220, 225, 230),
-      "left",
-      500
-    );
-  });
-
-  const notesX = panelX + 330;
-  fillText(context, "ASSEMBLY NOTES", notesX, panelY + 28, 18, rgb(90, 226, 220), "left", 700);
-  [
-    "Press 1 first to cycle chassis types",
-    "Then use 2-5 to add mobility, sensing, and arm modules",
-    "Press A / D to rotate the 3D preview"
-  ].forEach((line, index) => {
-    fillText(context, line, notesX, panelY + 56 + index * 22, 15, rgb(196, 205, 210), "left", 500);
-  });
-
-  const previewX = panelX + panelWidth - 190;
-  const previewY = panelY + 44;
-  fillRoundedRect(context, previewX, previewY, 160, 160, 14, rgb(14, 18, 20, 0.85));
-  strokeRoundedRect(context, previewX, previewY, 160, 160, 14, rgb(80, 90, 96, 0.8), 1);
-  fillText(context, "ROBOT", previewX + 80, previewY + 22, 16, rgb(210, 220, 225), "center", 700);
-  drawRobotModel(context, previewX + 80, previewY + 94, 0.48);
-}
-
-function drawStatusPanel(context) {
-  if (isAssemblyMode) {
-    drawAssemblyStatusPanel(context);
-    return;
-  }
-
-  const panelWidth = 760;
-  const panelHeight = 236;
-  const panelX = 16;
-  const panelY = SIM_H - panelHeight - 16;
-  const exitDistance = Math.hypot(mazeExit.x - robotX, mazeExit.z - robotZ);
-  const currentTileX = Math.max(1, Math.floor((Math.floor(robotX) - 1) / 2) + 1);
-  const currentTileZ = Math.max(1, Math.floor((Math.floor(robotZ) - 1) / 2) + 1);
-
-  fillRoundedRect(context, panelX, panelY, panelWidth, panelHeight, 18, rgb(10, 14, 18, 0.84));
-  strokeRoundedRect(context, panelX, panelY, panelWidth, panelHeight, 18, rgb(78, 100, 110, 0.85), 1);
-  fillText(context, "ROBOT STATUS", panelX + 18, panelY + 28, 21, rgb(230, 235, 240), "left", 700);
-
-  const infoLines = [
-    `State: ${robotState}`,
-    `Cell: ${currentTileX}, ${currentTileZ}`,
-    mazeSolved ? "Exit: reached" : `Exit: ${exitDistance.toFixed(1)}m`,
-    heldObject === null ? "Payload: none" : `Payload: ${heldObject.shape}`
-  ];
-  infoLines.forEach((line, index) => {
-    fillText(context, line, panelX + 18, panelY + 58 + index * 22, 17, rgb(210, 215, 220), "left", 500);
-  });
-
-  fillText(context, "EQUIPPED", panelX + 18, panelY + 144, 16, rgb(150, 170, 180), "left", 700);
-  let row = 0;
-  for (const [category, color] of [
-    ["Chassis", TOOLBOX_COLORS[0]],
-    ["Wheels (WASD)", TOOLBOX_COLORS[1]],
-    ["Lidar", TOOLBOX_COLORS[2]],
-    ["Camera (View)", TOOLBOX_COLORS[3]],
-    ["Arm (SPACE)", TOOLBOX_COLORS[4]]
-  ]) {
-    const value = selectedPart(category);
-    if (value === "None" || value === "Off") {
-      continue;
-    }
-    const lineY = panelY + 166 + row * 14;
-    context.beginPath();
-    context.arc(panelX + 21, lineY - 5, 4, 0, Math.PI * 2);
-    context.fillStyle = bgr(color);
-    context.fill();
-    fillText(context, `${category.split(" (")[0]}: ${value}`, panelX + 34, lineY, 14, rgb(220, 225, 230), "left", 500);
-    row += 1;
-  }
-  if (row === 0) {
-    fillText(context, "No active parts", panelX + 18, panelY + 168, 14, rgb(120, 130, 135), "left", 500);
-  }
-
-  const lidarX = panelX + 285;
-  fillText(context, "LIDAR / MAZE CONTACTS", lidarX, panelY + 28, 18, bgr([110, 120, 240]), "left", 700);
-  if (selectedPart("Lidar") !== "On") {
-    fillText(context, "Offline", lidarX, panelY + 56, 16, rgb(120, 130, 135), "left", 500);
-  } else {
-    const detections = getLidarDetections(5.5);
-    if (detections.length === 0) {
-      fillText(context, "No contacts in range", lidarX, panelY + 56, 16, rgb(140, 200, 150), "left", 500);
-    } else {
-      detections.slice(0, 8).forEach((detection, index) => {
-        const lineY = panelY + 56 + index * 20;
-        const color = detection.dist < 1.3
-          ? [40, 70, 255]
-          : detection.dist < 2.8
-            ? [60, 200, 255]
-            : [90, 220, 120];
-        context.beginPath();
-        context.arc(lidarX + 5, lineY - 4, 4, 0, Math.PI * 2);
-        context.fillStyle = bgr(color);
-        context.fill();
-        fillText(context, `${detection.type} ${detection.dist.toFixed(1)}m`, lidarX + 16, lineY, 15, bgr(color), "left", 500);
-      });
-    }
-  }
-
-  const previewX = panelX + panelWidth - 190;
-  const previewY = panelY + 44;
-  fillRoundedRect(context, previewX, previewY, 160, 160, 14, rgb(14, 18, 20, 0.85));
-  strokeRoundedRect(context, previewX, previewY, 160, 160, 14, rgb(80, 90, 96, 0.8), 1);
-  fillText(context, "ROBOT", previewX + 80, previewY + 22, 16, rgb(210, 220, 225), "center", 700);
-  drawRobotModel(context, previewX + 80, previewY + 94, 0.48);
-}
-
-function drawAssemblySim() {
-  ctx.clearRect(0, 0, SIM_W, SIM_H);
-
-  const background = ctx.createLinearGradient(0, 0, 0, SIM_H);
-  background.addColorStop(0, rgb(5, 10, 14));
-  background.addColorStop(0.55, rgb(7, 14, 18));
-  background.addColorStop(1, rgb(3, 7, 10));
-  ctx.fillStyle = background;
-  ctx.fillRect(0, 0, SIM_W, SIM_H);
-
-  const glow = ctx.createRadialGradient(SIM_W / 2, SIM_H * 0.46, 80, SIM_W / 2, SIM_H * 0.46, 760);
-  glow.addColorStop(0, "rgba(38, 222, 190, 0.18)");
-  glow.addColorStop(0.55, "rgba(0, 110, 120, 0.10)");
-  glow.addColorStop(1, "rgba(0, 0, 0, 0)");
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, SIM_W, SIM_H);
-
-  ctx.save();
-  ctx.strokeStyle = rgb(34, 74, 82, 0.48);
-  ctx.lineWidth = 1;
-  for (let y = Math.floor(SIM_H * 0.42); y < SIM_H; y += 42) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(SIM_W, y);
-    ctx.stroke();
-  }
-  const horizonX = SIM_W / 2;
-  const horizonY = Math.floor(SIM_H * 0.44);
-  for (let offset = -11; offset <= 11; offset += 1) {
-    ctx.beginPath();
-    ctx.moveTo(horizonX, horizonY);
-    ctx.lineTo(horizonX + offset * 170, SIM_H);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  const platformY = SIM_H * 0.76;
-  fillRoundedRect(ctx, SIM_W / 2 - 380, platformY - 118, 760, 170, 32, rgb(7, 14, 18, 0.92));
-  strokeRoundedRect(ctx, SIM_W / 2 - 380, platformY - 118, 760, 170, 32, rgb(64, 180, 196, 0.55), 2);
-
-  ctx.save();
-  ctx.strokeStyle = rgb(120, 250, 240, 0.18);
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.ellipse(SIM_W / 2, platformY - 34, 250, 64, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(SIM_W / 2, platformY - 34, 330, 84, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
-
-  drawRobotModel(ctx, SIM_W / 2, SIM_H * 0.54, 1.58);
-
-  fillText(ctx, "3D ASSEMBLY BAY", 28, SIM_H - 128, 18, rgb(80, 230, 220), "left", 700);
-  fillText(
-    ctx,
-    selectedPart("Chassis") === "None"
-      ? "Select a chassis first. Then cycle modules with 2-5 to complete the robot"
-      : "Rotate the preview with A / D or hand gestures, then switch to the maze when the build is ready",
-    28,
-    SIM_H - 102,
-    17,
-    rgb(215, 220, 225),
-    "left",
-    500
-  );
-  fillText(
-    ctx,
-    "Use the centered toolbox to swap components in place",
-    28,
-    SIM_H - 76,
-    16,
-    rgb(104, 214, 255),
-    "left",
-    500
-  );
-
-  ctx.save();
-  const vignette = ctx.createRadialGradient(SIM_W / 2, SIM_H / 2, SIM_H * 0.18, SIM_W / 2, SIM_H / 2, SIM_H * 0.76);
-  vignette.addColorStop(0, "rgba(0,0,0,0)");
-  vignette.addColorStop(1, "rgba(0,0,0,0.5)");
-  ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, SIM_W, SIM_H);
-  ctx.restore();
-}
-
-function drawSim() {
-  if (isAssemblyMode) {
-    drawAssemblySim();
-    return;
-  }
-
-  ctx.clearRect(0, 0, SIM_W, SIM_H);
-  const profile = getCameraProfile();
-  const horizonY = Math.floor(SIM_H * 0.4);
-  const halfFov = (profile.fovDeg * DEG_TO_RAD) / 2;
-  const rayCount = Math.ceil(SIM_W / RAY_STRIP_WIDTH);
-  const heading = robotAngle * DEG_TO_RAD;
-
-  const sky = ctx.createLinearGradient(0, 0, 0, horizonY);
-  sky.addColorStop(0, rgb(profile.skyTop[0], profile.skyTop[1], profile.skyTop[2]));
-  sky.addColorStop(1, rgb(profile.skyBottom[0], profile.skyBottom[1], profile.skyBottom[2]));
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, SIM_W, horizonY);
-
-  const floor = ctx.createLinearGradient(0, horizonY, 0, SIM_H);
-  floor.addColorStop(0, rgb(profile.floorTop[0], profile.floorTop[1], profile.floorTop[2]));
-  floor.addColorStop(1, rgb(profile.floorBottom[0], profile.floorBottom[1], profile.floorBottom[2]));
-  ctx.fillStyle = floor;
-  ctx.fillRect(0, horizonY, SIM_W, SIM_H - horizonY);
-
-  lastRayDepths = new Array(rayCount);
-  for (let i = 0; i < rayCount; i += 1) {
-    const cameraX = ((i + 0.5) / rayCount) * 2 - 1;
-    const rayAngle = heading + Math.atan(cameraX * Math.tan(halfFov));
-    const hit = castRay(robotX, robotZ, rayAngle);
-    const correctedDistance = Math.max(0.12, hit.distance * Math.cos(rayAngle - heading));
-    lastRayDepths[i] = correctedDistance;
-
-    const wallHeight = Math.min(SIM_H * 0.95, (SIM_H * 0.88) / correctedDistance);
-    const wallTop = horizonY - wallHeight / 2;
-    const shade = clamp(1 - correctedDistance / MAX_VIEW_DISTANCE, 0.12, 1);
-    const palette = hit.side === 0 ? profile.wallMain : profile.wallSide;
-    const pulse = mazeSolved ? 0.15 * Math.sin(frameSeconds * 4) + 0.85 : 1;
-    ctx.fillStyle = rgb(
-      Math.round((palette[0] * shade + 12) * pulse),
-      Math.round((palette[1] * shade + 12) * pulse),
-      Math.round((palette[2] * shade + 12) * pulse)
-    );
-    ctx.fillRect(i * RAY_STRIP_WIDTH, wallTop, RAY_STRIP_WIDTH + 1, wallHeight);
+    const screen = worldToScreen(object.x, object.z, centerX, horizonY, groundY, spanX);
+    drawObjectShape(ctx, object, screen.x, screen.y, Math.round(object.size * screen.scale));
   }
 
   updateWanderingHumans();
-  drawMazeSprites(ctx, profile, horizonY, lastRayDepths);
-
-  const crossX = SIM_W / 2;
-  const crossY = SIM_H / 2;
-  ctx.save();
-  ctx.strokeStyle = rgb(profile.accent[0], profile.accent[1], profile.accent[2], 0.92);
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(crossX - 12, crossY);
-  ctx.lineTo(crossX - 4, crossY);
-  ctx.moveTo(crossX + 4, crossY);
-  ctx.lineTo(crossX + 12, crossY);
-  ctx.moveTo(crossX, crossY - 12);
-  ctx.lineTo(crossX, crossY - 4);
-  ctx.moveTo(crossX, crossY + 4);
-  ctx.lineTo(crossX, crossY + 12);
-  ctx.stroke();
-  ctx.restore();
-
-  const pickupCandidate = getNearestPickupCandidate();
-  fillText(ctx, profile.label, 28, SIM_H - 128, 18, rgb(profile.accent[0], profile.accent[1], profile.accent[2]), "left", 700);
-  fillText(ctx, mazeSolved ? "Maze cleared. Loading next maze..." : "Drive to the glowing exit beacon", 28, SIM_H - 102, 17, rgb(215, 220, 225), "left", 500);
-  if (pickupCandidate !== null) {
-    fillText(ctx, "Object in range. Use Space or left-hand fist to pick it up", 28, SIM_H - 76, 16, rgb(90, 230, 240), "left", 500);
-  } else if (heldObject !== null) {
-    fillText(ctx, "Payload locked. Use Space or left-hand fist to drop it", 28, SIM_H - 76, 16, rgb(120, 210, 255), "left", 500);
+  for (const human of wanderingHumans) {
+    const screen = worldToScreen(human.x, human.z, centerX, horizonY, groundY, spanX);
+    drawStickFigure(ctx, screen.x, screen.y, screen.scale, human.color);
   }
 
-  ctx.save();
-  const vignette = ctx.createRadialGradient(SIM_W / 2, SIM_H / 2, SIM_H * 0.2, SIM_W / 2, SIM_H / 2, SIM_H * 0.75);
-  vignette.addColorStop(0, "rgba(0,0,0,0)");
-  vignette.addColorStop(1, "rgba(0,0,0,0.45)");
-  ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, SIM_W, SIM_H);
-  ctx.restore();
+  const robotScreen = worldToScreen(robotX, robotZ, centerX, horizonY, groundY, spanX);
+  drawRobotModel(ctx, robotScreen.x, robotScreen.y, 1);
+
+  if (selectedPart("Arm (SPACE)") === "Extended" && heldObject === null) {
+    for (const object of staticObjects) {
+      const dx = object.x - robotX;
+      const dz = object.z - robotZ;
+      const dist = Math.hypot(dx, dz);
+      if (dist < PICKUP_RANGE) {
+        const screen = worldToScreen(object.x, object.z, centerX, horizonY, groundY, spanX);
+        const radius = Math.round(object.size * screen.scale) + 6;
+        const pulse = Math.abs(Math.sin(frameSeconds * 5)) * 0.5 + 0.5;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = bgr([0, Math.round(255 * pulse), Math.round(255 * pulse)]);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+        break;
+      }
+    }
+  }
+
+  for (let i = 0; i < 3; i += 1) {
+    const lightX = robotScreen.x - 10 + i * 10;
+    const lightPulse = Math.abs(Math.sin(frameSeconds * 3 + i * 0.5)) * 0.8 + 0.2;
+    let lightColor = [0, 0, Math.round(255 * lightPulse)];
+    if (robotState === "STANDING") {
+      lightColor = [0, Math.round(255 * lightPulse), Math.round(255 * lightPulse)];
+    } else if (robotState === "TURNING") {
+      lightColor = [0, Math.round(200 * lightPulse), Math.round(255 * lightPulse)];
+    } else if (robotState === "FROZEN") {
+      lightColor = [Math.round(255 * lightPulse), 0, Math.round(128 * lightPulse)];
+    } else if (robotState === "WALKING") {
+      lightColor = [0, Math.round(255 * lightPulse), 0];
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(lightX, robotScreen.y - 14, 2, 0, Math.PI * 2);
+    ctx.fillStyle = bgr(lightColor);
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 function drawCursor() {
@@ -1961,48 +1326,7 @@ function drawCursor() {
 }
 
 function drawPip() {
-  if (isAssemblyMode) {
-    const pipSize = 350;
-    const pipX = SIM_W - pipSize - 20;
-    const pipY = SIM_H - pipSize - 20;
-    const hasCameraFeed = cameraAvailable && video.readyState >= 2;
-
-    fillRoundedRect(ctx, pipX, pipY, pipSize, pipSize, 16, rgb(8, 12, 16, 0.96));
-    if (hasCameraFeed) {
-      const cropSize = Math.min(CAM_W, CAM_H);
-      const cropX = (CAM_W - cropSize) / 2;
-      const cropY = (CAM_H - cropSize) / 2;
-      ctx.drawImage(detectionCanvas, cropX, cropY, cropSize, cropSize, pipX + 20, pipY + 20, pipSize - 40, 150);
-    }
-
-    fillText(ctx, "ASSEMBLY CONTROLS", pipX + pipSize / 2, pipY + (hasCameraFeed ? 208 : 56), 24, bgr([255, 200, 0]), "center", 700);
-    [
-      "1-5 cycle component slots",
-      "A / D rotate the preview rig",
-      "Use the Maze page to test-drive the finished robot",
-      "Q stops the simulation"
-    ].forEach((line, index) => {
-      fillText(
-        ctx,
-        line,
-        pipX + pipSize / 2,
-        pipY + (hasCameraFeed ? 246 : 104) + index * 34,
-        18,
-        rgb(205, 214, 220),
-        "center",
-        500
-      );
-    });
-
-    ctx.save();
-    ctx.strokeStyle = bgr([255, 200, 0]);
-    ctx.lineWidth = 2;
-    ctx.strokeRect(pipX, pipY, pipSize, pipSize);
-    ctx.restore();
-    return;
-  }
-
-  const pipSize = 350;
+  const pipSize = 380;
   const pipX = SIM_W - pipSize - 20;
   const pipY = SIM_H - pipSize - 20;
   const hasCameraFeed = cameraAvailable && video.readyState >= 2;
@@ -2013,14 +1337,18 @@ function drawPip() {
     const cropY = (CAM_H - cropSize) / 2;
     ctx.drawImage(detectionCanvas, cropX, cropY, cropSize, cropSize, pipX, pipY, pipSize, pipSize);
   } else {
-    fillRoundedRect(ctx, pipX, pipY, pipSize, pipSize, 16, rgb(8, 12, 16, 0.96));
-    fillText(ctx, "MANUAL PILOT", pipX + pipSize / 2, pipY + 56, 26, bgr([255, 200, 0]), "center", 700);
-    fillText(ctx, "W / S drive", pipX + pipSize / 2, pipY + 116, 22, rgb(210, 220, 225), "center", 600);
-    fillText(ctx, "A / D steer", pipX + pipSize / 2, pipY + 148, 22, rgb(210, 220, 225), "center", 600);
-    fillText(ctx, "M new maze", pipX + pipSize / 2, pipY + 208, 20, rgb(80, 190, 255), "center", 700);
-    fillText(ctx, "1-5 toggle parts", pipX + pipSize / 2, pipY + 248, 18, rgb(200, 205, 210), "center", 500);
-    fillText(ctx, "Space pick/drop", pipX + pipSize / 2, pipY + 280, 18, rgb(200, 205, 210), "center", 500);
-    fillText(ctx, "Q stop simulation", pipX + pipSize / 2, pipY + 312, 18, rgb(160, 170, 176), "center", 500);
+    ctx.save();
+    ctx.fillStyle = rgb(6, 10, 14);
+    ctx.fillRect(pipX, pipY, pipSize, pipSize);
+    fillText(ctx, "ROBOTIC PANEL", pipX + pipSize / 2, pipY + 64, 28, bgr([255, 200, 0]), "center", 700);
+    fillText(ctx, "Camera feed unavailable", pipX + pipSize / 2, pipY + 118, 18, rgb(200, 200, 200), "center", 500);
+    fillText(ctx, "Manual control is active", pipX + pipSize / 2, pipY + 148, 18, rgb(170, 170, 170), "center", 500);
+    fillText(ctx, "W / A / S / D", pipX + pipSize / 2, pipY + 216, 24, bgr([0, 170, 255]), "center", 700);
+    fillText(ctx, "Move the robot", pipX + pipSize / 2, pipY + 246, 17, rgb(210, 210, 210), "center", 500);
+    fillText(ctx, "1-5", pipX + pipSize / 2, pipY + 294, 24, bgr([0, 170, 255]), "center", 700);
+    fillText(ctx, "Cycle chassis, wheels, lidar, camera, arm", pipX + pipSize / 2, pipY + 322, 16, rgb(210, 210, 210), "center", 500);
+    fillText(ctx, "Space pick/drop", pipX + pipSize / 2, pipY + 350, 16, rgb(170, 170, 170), "center", 500);
+    ctx.restore();
   }
 
   ctx.save();
@@ -2029,27 +1357,31 @@ function drawPip() {
   ctx.strokeRect(pipX, pipY, pipSize, pipSize);
   ctx.restore();
 
-  renderRobotCameraView();
-  const viewWidth = robotViewCanvas.width;
-  const viewHeight = robotViewCanvas.height;
-  const viewX = pipX - viewWidth - 8;
-  const viewY = pipY + pipSize - viewHeight;
-  ctx.drawImage(robotViewCanvas, viewX, viewY);
-  ctx.save();
-  ctx.strokeStyle = bgr([255, 200, 0]);
-  ctx.lineWidth = 1;
-  ctx.strokeRect(viewX, viewY, viewWidth, viewHeight);
-  ctx.beginPath();
-  ctx.fillStyle = bgr([0, 180, 255]);
-  ctx.arc(viewX + 10, viewY + 12, 4, 0, Math.PI * 2);
-  ctx.fill();
-  fillText(ctx, "Maze map", viewX + 18, viewY + 16, 14, rgb(255, 255, 255), "left", 500);
-  ctx.restore();
+  if (selectedPart("Camera (View)") !== "None") {
+    renderRobotCameraView();
+    const viewWidth = robotViewCanvas.width;
+    const viewHeight = robotViewCanvas.height;
+    const viewX = pipX - viewWidth - 6;
+    const viewY = pipY + pipSize - viewHeight;
+    ctx.drawImage(robotViewCanvas, viewX, viewY);
+    ctx.save();
+    ctx.strokeStyle = bgr([255, 200, 0]);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(viewX, viewY, viewWidth, viewHeight);
+    ctx.beginPath();
+    ctx.fillStyle = bgr([0, 0, 220]);
+    ctx.arc(viewX + 10, viewY + 12, 4, 0, Math.PI * 2);
+    ctx.fill();
+    fillText(ctx, "Live", viewX + 18, viewY + 16, 14, rgb(255, 255, 255), "left", 500);
+    ctx.restore();
+  }
 }
 
 function drawFrozenLabel() {
   fillText(ctx, "FROZEN", SIM_W / 2, 35, 36, bgr([0, 80, 255]), "center", 700);
 }
+
+function drawModeBanner() {}
 
 function drawBootScreen() {
   ctx.clearRect(0, 0, SIM_W, SIM_H);
@@ -2174,9 +1506,7 @@ function processDetections(results, nowMs) {
   prevActionFist = currentActionFist;
 
   const cursorInUi = updateToolboxLogic(cursorX, cursorY, pinching, nowMs / 1000);
-  if (isAssemblyMode) {
-    updateAssemblyPreview();
-  } else if (!cursorInUi) {
+  if (!cursorInUi) {
     updateRobot();
   }
 
@@ -2202,11 +1532,6 @@ function processManualControls() {
     stableGesture = "MOVE_LEFT";
   } else if (manualKeys.KeyD && !manualKeys.KeyA) {
     stableGesture = "MOVE_RIGHT";
-  }
-
-  if (isAssemblyMode) {
-    updateAssemblyPreview();
-    return;
   }
 
   updateRobot();
@@ -2247,11 +1572,8 @@ function loop(nowMs) {
     processManualControls();
   }
 
-  if (mazeSolved && frameSeconds - mazeSolvedAt > MAZE_RESET_DELAY) {
-    resetMazeWorld();
-  }
-
   drawSim();
+  drawModeBanner(ctx);
 
   if (robotFrozen) {
     drawFrozenLabel();
@@ -2315,13 +1637,7 @@ async function setupCamera() {
 async function init() {
   try {
     if (directOpenMode) {
-      setControlMode(
-        "manual",
-        isAssemblyMode ? "ASSEMBLY MANUAL MODE" : "DIRECT OPEN MODE",
-        isAssemblyMode
-          ? "Opened from a local file. Build the robot with 1-5 and rotate it with A / D"
-          : "Opened from a local file. First-person maze drive is ready"
-      );
+      setControlMode("manual", "DIRECT OPEN MODE", "Opened from a local file. The robotic panel is ready");
       running = true;
       requestAnimationFrame(loop);
       return;
@@ -2335,23 +1651,13 @@ async function init() {
     setBootScreen("INITIALIZING", "Opening camera");
     await setupCamera();
     cameraAvailable = true;
-    setControlMode(
-      "gesture",
-      isAssemblyMode ? "ASSEMBLY GESTURE MODE" : "GESTURE MODE",
-      isAssemblyMode
-        ? "Camera and hand tracking are live for component selection"
-        : "Camera and hand tracking are live for maze driving"
-    );
+    setControlMode("gesture", "GESTURE MODE", "Camera and hand tracking are live");
     running = true;
     requestAnimationFrame(loop);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(error);
-    setControlMode(
-      "manual",
-      isAssemblyMode ? "ASSEMBLY MANUAL MODE" : "MANUAL MODE",
-      isAssemblyMode ? `${message} Use 1-5 to build and A / D to rotate the rig` : message
-    );
+    setControlMode("manual", "MANUAL MODE", message);
     running = true;
     requestAnimationFrame(loop);
   }
@@ -2362,7 +1668,7 @@ window.addEventListener("keydown", (event) => {
     manualKeys[event.code] = true;
   }
 
-  if ((controlMode === "manual" || isAssemblyMode) && event.key >= "1" && event.key <= "5") {
+  if (controlMode === "manual" && event.key >= "1" && event.key <= "5") {
     event.preventDefault();
     cycleSelectedPart(TOOLBOX_CATEGORIES[Number(event.key) - 1]);
   }
@@ -2373,12 +1679,6 @@ window.addEventListener("keydown", (event) => {
       tryPickup();
     } else {
       tryDrop();
-    }
-  }
-  if (event.key === "m" || event.key === "M") {
-    event.preventDefault();
-    if (!isAssemblyMode) {
-      resetMazeWorld();
     }
   }
   if (event.key === "q" || event.key === "Q" || event.key === "Escape") {
@@ -2399,6 +1699,5 @@ window.addEventListener("beforeunload", () => {
   }
 });
 
-resetMazeWorld();
 drawBootScreen();
 init();
